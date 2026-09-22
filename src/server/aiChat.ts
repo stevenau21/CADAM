@@ -123,10 +123,14 @@ const MODEL_PRICES: Record<string, ModelPrice> = {
     cacheRead: 0.5,
     cacheWrite: 6.25,
   },
-  'openai/qwen2.5-coder': {
-    input: 0.5,
-    output: 1,
-  },
+  // Ollama Cloud models reached through the OpenAI-compatible endpoint.
+  // Prices are placeholder list rates; adjust to match what you pay.
+  'openai/glm-5.3': { input: 1, output: 3 },
+  'openai/glm-5.3-flash': { input: 0.2, output: 0.6 },
+  'openai/kimi-k3': { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
+  'openai/kimi-k2.7-code': { input: 0.6, output: 2.5 },
+  'openai/deepseek-v4.1-flash': { input: 0.3, output: 1.2 },
+  'openai/deepseek-v4-pro:0813': { input: 0.6, output: 2.4 },
 
   // xAI — cached input reads at 25% of input; no cache-write surcharge.
   'x-ai/grok-4.6': { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
@@ -538,8 +542,11 @@ function buildChatModel(
 
   if (modelId.startsWith('openai/')) {
     const id = modelId.slice('openai/'.length);
+    // `.chat()` targets the Chat Completions API, which is what
+    // OpenAI-compatible gateways (Ollama Cloud, etc.) implement. The
+    // default callable would use OpenAI's newer Responses API instead.
     return {
-      model: providers.openai()(id),
+      model: providers.openai().chat(id),
     };
   }
 
