@@ -1,0 +1,6 @@
+# Build outputs. Each /build writes a temp artifact dir; these are large,
+# regenerable, and machine-specific -- never commit them.
+artifacts/
+__pycache__/
+*.pyc
+.venv/

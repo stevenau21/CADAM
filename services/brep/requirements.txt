@@ -1,0 +1,10 @@
+# B-Rep build service (CADAM x cadgen fusion, Phase 0)
+#
+# The kernel is pinned deliberately: generated model scripts depend on exact
+# build123d/OCP behaviour, so a silent upgrade can change geometry or break an
+# API mid-project. Bump these on purpose, never incidentally.
+build123d>=0.11.1,<0.12
+cadquery-ocp-novtk
+fastapi
+uvicorn[standard]
+pydantic
