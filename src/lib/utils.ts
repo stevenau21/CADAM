@@ -301,6 +301,15 @@ export const PARAMETRIC_MODELS: ModelConfig[] = [
     supportsVision: true,
   },
   {
+    id: 'openai/qwen2.5-coder',
+    name: 'Qwen 2.5 Coder (Ollama Cloud)',
+    description: 'OpenAI-compatible Qwen coder model via Ollama Cloud',
+    provider: 'OpenAI',
+    supportsTools: true,
+    supportsThinking: false,
+    supportsVision: false,
+  },
+  {
     id: 'x-ai/grok-4.6',
     name: 'Grok 4.6',
     description: 'Latest xAI model with frontier coding and STEM performance',

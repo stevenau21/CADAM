@@ -1,5 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { chatTools, type AppUIMessage, type AppTools } from '@shared/chatAi';
 import { cleanAssistantText, getParametricText } from '@shared/parametricParts';
@@ -121,6 +122,10 @@ const MODEL_PRICES: Record<string, ModelPrice> = {
     output: 30,
     cacheRead: 0.5,
     cacheWrite: 6.25,
+  },
+  'openai/qwen2.5-coder': {
+    input: 0.5,
+    output: 1,
   },
 
   // xAI — cached input reads at 25% of input; no cache-write surcharge.
@@ -388,16 +393,18 @@ function jsonResponse(body: unknown, status: number) {
 const THINKING_BUDGET_TOKENS = 9000;
 const PARAMETRIC_MAX_OUTPUT_TOKENS = 64000;
 
-type ChatProvider = 'anthropic' | 'google' | 'openrouter';
+type ChatProvider = 'anthropic' | 'google' | 'openai' | 'openrouter';
 
 function providerFor(modelId: string): ChatProvider {
   if (modelId.startsWith('anthropic/')) return 'anthropic';
   if (modelId.startsWith('google/')) return 'google';
+  if (modelId.startsWith('openai/')) return 'openai';
   return 'openrouter';
 }
 
 type AnthropicProvider = ReturnType<typeof createAnthropic>;
 type GoogleProvider = ReturnType<typeof createGoogleGenerativeAI>;
+type OpenAIProvider = ReturnType<typeof createOpenAI>;
 
 // The Vercel AI SDK's Anthropic provider expects ANTHROPIC_BASE_URL to already
 // include the "/v1" path segment (its built-in default is
@@ -416,12 +423,14 @@ function normalizedAnthropicBaseURL(): string | undefined {
 type ChatProviders = {
   anthropic: () => AnthropicProvider;
   google: () => GoogleProvider;
+  openai: () => OpenAIProvider;
   openrouter: () => ReturnType<typeof createOpenRouter>;
 };
 
 function createChatProviders(): ChatProviders {
   let anthropic: AnthropicProvider | undefined;
   let google: GoogleProvider | undefined;
+  let openai: OpenAIProvider | undefined;
   let openrouter: ReturnType<typeof createOpenRouter> | undefined;
   return {
     anthropic: () => {
@@ -439,6 +448,14 @@ function createChatProviders(): ChatProviders {
         apiKey: requiredEnv('GOOGLE_API_KEY'),
       });
       return google;
+    },
+    openai: () => {
+      openai ??= createOpenAI({
+        apiKey: env('OPENAI_API_KEY') || 'ollama',
+        baseURL:
+          env('OPENAI_BASE_URL').replace(/\/$/, '') || 'https://ollama.com/v1',
+      });
+      return openai;
     },
     openrouter: () => {
       openrouter ??= createOpenRouter({
@@ -516,6 +533,13 @@ function buildChatModel(
           },
         },
       },
+    };
+  }
+
+  if (modelId.startsWith('openai/')) {
+    const id = modelId.slice('openai/'.length);
+    return {
+      model: providers.openai()(id),
     };
   }
 
