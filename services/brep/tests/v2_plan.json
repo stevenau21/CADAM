@@ -1,0 +1,312 @@
+{
+  "units": "mm",
+  "description": "V2 container + lid, rebuilt from measured dimensions. Mating dimensions are DERIVED from shared parameters, and the fit is asserted by the plan itself.",
+  "parameters": [
+    {
+      "name": "body_x",
+      "value": 80,
+      "min": 20,
+      "max": 300,
+      "step": 1,
+      "label": "Body width"
+    },
+    {
+      "name": "body_y",
+      "value": 64,
+      "min": 20,
+      "max": 300,
+      "step": 1,
+      "label": "Body depth"
+    },
+    {
+      "name": "body_r",
+      "value": 8,
+      "min": 0,
+      "max": 40,
+      "step": 0.5,
+      "label": "Body corner radius"
+    },
+    {
+      "name": "body_h",
+      "value": 67,
+      "min": 10,
+      "max": 300,
+      "step": 1,
+      "label": "Total height"
+    },
+    {
+      "name": "neck_x",
+      "value": 77,
+      "min": 20,
+      "max": 300,
+      "step": 1,
+      "label": "Neck width"
+    },
+    {
+      "name": "neck_y",
+      "value": 61,
+      "min": 20,
+      "max": 300,
+      "step": 1,
+      "label": "Neck depth"
+    },
+    {
+      "name": "neck_r",
+      "value": 6.5,
+      "min": 0,
+      "max": 40,
+      "step": 0.5,
+      "label": "Neck corner radius"
+    },
+    {
+      "name": "neck_z0",
+      "value": 58,
+      "min": 5,
+      "max": 300,
+      "step": 1,
+      "label": "Neck step height"
+    },
+    {
+      "name": "wall_body",
+      "value": 3.9,
+      "min": 1,
+      "max": 10,
+      "step": 0.1,
+      "label": "Body wall thickness"
+    },
+    {
+      "name": "floor_t",
+      "value": 2.4,
+      "min": 0.8,
+      "max": 10,
+      "step": 0.1,
+      "label": "Floor thickness"
+    },
+    {
+      "name": "clearance",
+      "value": 0.4,
+      "min": 0.1,
+      "max": 1,
+      "step": 0.05,
+      "label": "Lid clearance per side"
+    },
+    {
+      "name": "lid_wall",
+      "value": 2.6,
+      "min": 0.8,
+      "max": 10,
+      "step": 0.1,
+      "label": "Lid wall thickness"
+    },
+    {
+      "name": "lid_h",
+      "value": 10.4,
+      "min": 3,
+      "max": 60,
+      "step": 0.2,
+      "label": "Lid height"
+    },
+    {
+      "name": "lid_z0",
+      "value": 60,
+      "min": 0,
+      "max": 300,
+      "step": 1,
+      "label": "Lid bottom Z"
+    },
+    {
+      "name": "skirt_z1",
+      "value": 67.8,
+      "min": 1,
+      "max": 300,
+      "step": 0.1,
+      "label": "Lid skirt top Z"
+    },
+    {
+      "name": "lead_in_h",
+      "value": 0.75,
+      "min": 0.1,
+      "max": 5,
+      "step": 0.05,
+      "label": "Mouth lead-in height"
+    },
+    {
+      "name": "lead_in_extra",
+      "value": 0.3,
+      "min": 0.05,
+      "max": 2,
+      "step": 0.05,
+      "label": "Mouth lead-in flare"
+    }
+  ],
+  "derived": [
+    { "name": "cav_x", "expr": "body_x - 2*wall_body" },
+    { "name": "cav_y", "expr": "body_y - 2*wall_body" },
+    { "name": "cav_r", "expr": "body_r - wall_body" },
+    { "name": "skirt_in_x", "expr": "neck_x + 2*clearance" },
+    { "name": "skirt_in_y", "expr": "neck_y + 2*clearance" },
+    { "name": "skirt_in_r", "expr": "neck_r + clearance" },
+    { "name": "lid_out_x", "expr": "skirt_in_x + 2*lid_wall" },
+    { "name": "lid_out_y", "expr": "skirt_in_y + 2*lid_wall" },
+    { "name": "lid_out_r", "expr": "skirt_in_r + lid_wall" },
+    { "name": "mouth_x", "expr": "skirt_in_x + 2*lead_in_extra" },
+    { "name": "mouth_y", "expr": "skirt_in_y + 2*lead_in_extra" },
+    { "name": "mouth_r", "expr": "skirt_in_r + lead_in_extra" },
+    { "name": "skirt_h", "expr": "skirt_z1 - (lid_z0 + lead_in_h)" }
+  ],
+  "features": [
+    {
+      "op": "sketch.rect",
+      "id": "body_sk",
+      "w": "body_x",
+      "h": "body_y",
+      "r": "body_r"
+    },
+    {
+      "op": "extrude",
+      "id": "body_main",
+      "profile": "body_sk",
+      "height": "neck_z0"
+    },
+
+    {
+      "op": "sketch.rect",
+      "id": "neck_sk",
+      "w": "neck_x",
+      "h": "neck_y",
+      "r": "neck_r"
+    },
+    {
+      "op": "extrude",
+      "id": "neck_raw",
+      "profile": "neck_sk",
+      "height": "body_h - neck_z0"
+    },
+    { "op": "translate", "id": "neck", "target": "neck_raw", "z": "neck_z0" },
+
+    {
+      "op": "boolean",
+      "id": "body_outer",
+      "kind": "union",
+      "a": "body_main",
+      "b": "neck"
+    },
+
+    {
+      "op": "sketch.rect",
+      "id": "cav_sk",
+      "w": "cav_x",
+      "h": "cav_y",
+      "r": "cav_r"
+    },
+    {
+      "op": "extrude",
+      "id": "cav_raw",
+      "profile": "cav_sk",
+      "height": "body_h"
+    },
+    { "op": "translate", "id": "cavity", "target": "cav_raw", "z": "floor_t" },
+    {
+      "op": "boolean",
+      "id": "body",
+      "kind": "cut",
+      "a": "body_outer",
+      "b": "cavity"
+    },
+
+    {
+      "op": "sketch.rect",
+      "id": "lid_sk",
+      "w": "lid_out_x",
+      "h": "lid_out_y",
+      "r": "lid_out_r"
+    },
+    {
+      "op": "extrude",
+      "id": "lid_raw",
+      "profile": "lid_sk",
+      "height": "lid_h"
+    },
+    {
+      "op": "translate",
+      "id": "lid_solid",
+      "target": "lid_raw",
+      "z": "lid_z0"
+    },
+
+    {
+      "op": "sketch.rect",
+      "id": "mouth_sk",
+      "w": "mouth_x",
+      "h": "mouth_y",
+      "r": "mouth_r"
+    },
+    {
+      "op": "extrude",
+      "id": "mouth_raw",
+      "profile": "mouth_sk",
+      "height": "lead_in_h"
+    },
+    { "op": "translate", "id": "mouth", "target": "mouth_raw", "z": "lid_z0" },
+
+    {
+      "op": "sketch.rect",
+      "id": "skirt_sk",
+      "w": "skirt_in_x",
+      "h": "skirt_in_y",
+      "r": "skirt_in_r"
+    },
+    {
+      "op": "extrude",
+      "id": "skirt_raw",
+      "profile": "skirt_sk",
+      "height": "skirt_h"
+    },
+    {
+      "op": "translate",
+      "id": "skirt",
+      "target": "skirt_raw",
+      "z": "lid_z0 + lead_in_h"
+    },
+
+    {
+      "op": "boolean",
+      "id": "lid_cavity",
+      "kind": "union",
+      "a": "mouth",
+      "b": "skirt"
+    },
+    {
+      "op": "boolean",
+      "id": "lid",
+      "kind": "cut",
+      "a": "lid_solid",
+      "b": "lid_cavity"
+    },
+
+    {
+      "op": "boolean",
+      "id": "assembly",
+      "kind": "union",
+      "a": "body",
+      "b": "lid"
+    }
+  ],
+  "checks": [
+    {
+      "kind": "gap",
+      "a": "body",
+      "b": "lid",
+      "expect": "clearance",
+      "tolerance": 0.0001
+    },
+    {
+      "kind": "interference",
+      "a": "body",
+      "b": "lid",
+      "expect": 0,
+      "tolerance": 0.0001
+    }
+  ],
+  "result": "assembly"
+}

@@ -1,13 +1,19 @@
-"""Execute a build123d script and export its RESULT.
+"""Execute a model in an isolated subprocess and export the result.
 
-Deliberately run as a SUBPROCESS so that a syntax error, a kernel crash, an
-infinite loop or an OOM kills only this process -- never the service.
+Deliberately a SUBPROCESS so that a syntax error, a kernel crash, an infinite
+loop or an OOM kills only this process -- never the service.
 
-Usage:  python runner.py <user_code.py> <outdir>
+Usage:
+    python runner.py --code <user_code.py> <outdir>
+    python runner.py --plan <plan.json>    <outdir>
 
 Protocol: the last stdout line is  __BREP_RESULT__ {json}
-Everything the user's script prints goes into the payload as `stdout`, so a
-script can report its own measurements back to the caller.
+Everything the model printed goes back as `stdout`, so a script can report its
+own measurements to the caller.
+
+Code mode executes a build123d script (Phase 0, and the future "advanced"
+escape hatch). Plan mode executes a validated ModelPlan through the compiler
+(Phase 1) -- it never executes authored Python.
 """
 import contextlib
 import io
@@ -37,12 +43,15 @@ def export_all(part, log):
     ):
         path = f"model.{name}"
         try:
-            # NOTE: redirect_stdout, not `with log:` -- the latter CLOSES the
-            # buffer on exit and every later log.getvalue() raises.
+            # NOTE: contextlib.redirect_stdout, not `with log:` -- the latter
+            # CLOSES the buffer, and every later log.getvalue() then raises.
             with contextlib.redirect_stdout(log):
                 fn(part, path, **args)
             if os.path.exists(path):
-                written[name] = {"path": os.path.abspath(path), "bytes": os.path.getsize(path)}
+                written[name] = {
+                    "path": os.path.abspath(path),
+                    "bytes": os.path.getsize(path),
+                }
         except Exception as exc:  # noqa: BLE001 - report, don't abort the build
             log.write(f"[export {name} failed] {type(exc).__name__}: {exc}\n")
     return written
@@ -59,57 +68,94 @@ def stats_for(part):
         "solids": None,
         "faces": None,
     }
-    try:
-        out["is_valid"] = bool(part.is_valid)
-    except Exception:
-        pass
-    try:
-        out["volume"] = float(part.volume)
-    except Exception:
-        pass
-    try:
-        out["solids"] = len(part.solids())
-    except Exception:
-        pass
-    try:
-        out["faces"] = len(part.faces())
-    except Exception:
-        pass
+    for key, fn in (
+        ("is_valid", lambda: bool(part.is_valid)),
+        ("volume", lambda: float(part.volume)),
+        ("solids", lambda: len(part.solids())),
+        ("faces", lambda: len(part.faces())),
+    ):
+        try:
+            out[key] = fn()
+        except Exception:  # noqa: BLE001 - stats are best-effort
+            pass
     return out
 
 
+def run_code(path, log):
+    with open(path, "r", encoding="utf-8") as fh:
+        src = fh.read()
+    ns = {"__name__": "__main__", "__file__": os.path.abspath(path)}
+    with contextlib.redirect_stdout(log):
+        exec(compile(src, path, "exec"), ns)
+
+    part = ns.get("RESULT")
+    if part is None:
+        for alias in ("result", "part", "model"):
+            if alias in ns:
+                part = ns[alias]
+                break
+    if part is None:
+        raise RuntimeError(
+            "the script did not define RESULT (a build123d Part/Solid/Compound)"
+        )
+    return part, {}, {}
+
+
+def run_plan(path, log):
+    from plan_schema import ModelPlan  # noqa: PLC0415 - subprocess-local import
+    from compiler import compile_plan  # noqa: PLC0415
+
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+
+    plan = ModelPlan.model_validate(raw)
+    with contextlib.redirect_stdout(log):
+        compiled = compile_plan(plan.model_dump())
+
+    checks = compiled["checks"]
+    if checks:
+        with contextlib.redirect_stdout(log):
+            for c in checks:
+                line = "CHECK %s %s<->%s value=%.6f" % (c["kind"], c["a"], c["b"], c["value"])
+                if "expect" in c:
+                    line += " expect=%.6f tol=%.6f %s" % (
+                        c["expect"],
+                        c["tolerance"],
+                        "PASS" if c["pass"] else "FAIL",
+                    )
+                print(line)
+
+    symbols = {k: round(v, 6) for k, v in compiled["symbols"].items()}
+    return compiled["result"], {"checks": checks, "symbols": symbols, "result_id": compiled["result_id"]}, symbols
+
+
 def main() -> None:
-    if len(sys.argv) < 3:
-        emit({"ok": False, "error": "usage: runner.py <code.py> <outdir>"})
+    argv = sys.argv[1:]
+    if len(argv) != 3 or argv[0] not in ("--code", "--plan"):
+        emit({"ok": False, "error": "usage: runner.py --code|--plan <file> <outdir>"})
         return
 
-    code_path, outdir = sys.argv[1], sys.argv[2]
+    mode, src_path, outdir = argv
     os.makedirs(outdir, exist_ok=True)
     os.chdir(outdir)
 
     started = time.time()
     log = io.StringIO()
-    payload = {"ok": False, "error": None, "stats": None, "outputs": {}, "stdout": ""}
+    payload = {
+        "ok": False,
+        "error": None,
+        "stats": None,
+        "outputs": {},
+        "stdout": "",
+        "extra": {},
+    }
 
     try:
-        with open(code_path, "r", encoding="utf-8") as fh:
-            src = fh.read()
-
-        ns = {"__name__": "__main__", "__file__": os.path.abspath(code_path)}
-        with contextlib.redirect_stdout(log):
-            exec(compile(src, code_path, "exec"), ns)
-
-        part = ns.get("RESULT")
-        if part is None:
-            for alias in ("result", "part", "model"):
-                if alias in ns:
-                    part = ns[alias]
-                    break
-        if part is None:
-            raise RuntimeError(
-                "the script did not define RESULT (a build123d Part/Solid/Compound)"
-            )
-
+        if mode == "--plan":
+            part, extra, _ = run_plan(src_path, log)
+        else:
+            part, extra, _ = run_code(src_path, log)
+        payload["extra"] = extra
         payload["stats"] = stats_for(part)
         payload["outputs"] = export_all(part, log)
         payload["ok"] = True
