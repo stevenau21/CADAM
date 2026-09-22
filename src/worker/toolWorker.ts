@@ -20,6 +20,8 @@ import {
   WorkerMessageType,
 } from '@/worker/types';
 import { errorFromWorker } from '@/worker/workerError';
+import { resolveMeshFile } from '@/worker/meshFileStore';
+import { extractImportFilenames } from '@/utils/scadImports';
 
 type PendingRequest = {
   resolve: (value: OpenSCADWorkerResponseData) => void;
@@ -56,11 +58,66 @@ function getToolWorker(): Worker {
   return workerInstance;
 }
 
+/**
+ * Write a blob into the tool worker's WASM filesystem. Uses the same
+ * FS_WRITE request/response protocol as `useOpenSCAD` so the blob is staged
+ * in the worker's persistent file list and replayed into the fresh OpenSCAD
+ * instance every compile.
+ */
+function writeWorkerFile(
+  worker: Worker,
+  path: string,
+  content: Blob,
+): Promise<void> {
+  const requestId = `fs-write-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const responsePromise = new Promise<void>((resolve, reject) => {
+    pending.set(requestId, {
+      resolve: () => resolve(),
+      reject,
+    });
+  });
+  return content.arrayBuffer().then((arrayBuffer) => {
+    const message: WorkerMessage & { id: string } = {
+      id: requestId,
+      type: WorkerMessageType.FS_WRITE,
+      data: { path, content: arrayBuffer, type: content.type },
+    };
+    worker.postMessage(message, [arrayBuffer]);
+    return responsePromise;
+  });
+}
+
+// Paths already staged in the tool worker. The worker keeps its file list for
+// the process lifetime, so a given file only needs writing once.
+const writtenMeshPaths = new Set<string>();
+
+/** Stage every mesh an `import()` in `code` refers to. */
+async function prepareMeshFiles(worker: Worker, code: string): Promise<void> {
+  const imported = extractImportFilenames(code);
+  if (imported.length === 0) return;
+
+  for (const path of imported) {
+    if (writtenMeshPaths.has(path)) continue;
+    const content = resolveMeshFile(path);
+    if (!content) continue;
+    // Write under the *requested* path so OpenSCAD's import() resolves the
+    // exact string the model wrote (the worker mkdir's parents as needed),
+    // even when the model prefixed it with an invented directory.
+    await writeWorkerFile(worker, path, content);
+    writtenMeshPaths.add(path);
+  }
+}
+
 export async function previewScadColoredViaToolWorker(
   code: string,
 ): Promise<{ stl: Blob; off: Blob | undefined }> {
   const worker = getToolWorker();
   const requestId = `tool-preview-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  // Uploaded meshes must be in the worker FS *before* the compile runs,
+  // otherwise `import()` fails and the model sees a bogus "file not found"
+  // and falls back to a placeholder.
+  await prepareMeshFiles(worker, code);
 
   const responsePromise = new Promise<OpenSCADWorkerResponseData>(
     (resolve, reject) => {

@@ -1276,7 +1276,7 @@ export async function handleAiChatRequest(req: Request) {
               : '';
             return {
               type: 'text',
-              text: `[user attached ${fileType.toUpperCase()} "${filename}"]${dims}\nUse import("${filename}") to include the user's model. Use rotation_x = 90 to stand it upright.`,
+              text: `[user attached ${fileType.toUpperCase()} "${filename}"]${dims}\nThe user's uploaded mesh file is available to OpenSCAD under the exact name "${filename}". Reference it as import("${filename}") — use that bare filename verbatim, with NO folder or path prefix (paths like "/uploads/${filename}" do not exist and will fail). Use rotation_x = 90 to stand it upright.`,
             };
           }
           return {

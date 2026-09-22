@@ -1,4 +1,10 @@
-import { createContext, useContext, useRef, useCallback } from 'react';
+import { createContext, useContext, useCallback } from 'react';
+import {
+  clearMeshFiles as clearStore,
+  getMeshFile as getStoreFile,
+  hasMeshFile as hasStoreFile,
+  setMeshFile as setStoreFile,
+} from '@/worker/meshFileStore';
 
 interface MeshFilesContextType {
   // Store a mesh file by filename
@@ -15,25 +21,28 @@ export const MeshFilesContext = createContext<MeshFilesContextType | undefined>(
   undefined,
 );
 
+// Backed by the module-level store in `@/worker/meshFileStore` rather than a
+// component-local ref, so the non-React OpenSCAD tool worker can read the same
+// files when the AI runs `build_parametric_model` on code that import()s an
+// uploaded mesh.
 export function MeshFilesProvider({ children }: { children: React.ReactNode }) {
-  // Use ref to avoid re-renders when files are added
-  const meshFilesRef = useRef<Map<string, Blob>>(new Map());
-
   const setMeshFile = useCallback((filename: string, content: Blob) => {
     console.log(`[MeshFiles] Storing: "${filename}" (${content.size} bytes)`);
-    meshFilesRef.current.set(filename, content);
+    setStoreFile(filename, content);
   }, []);
 
-  const getMeshFile = useCallback((filename: string): Blob | undefined => {
-    return meshFilesRef.current.get(filename);
-  }, []);
+  const getMeshFile = useCallback(
+    (filename: string): Blob | undefined => getStoreFile(filename),
+    [],
+  );
 
-  const hasMeshFile = useCallback((filename: string): boolean => {
-    return meshFilesRef.current.has(filename);
-  }, []);
+  const hasMeshFile = useCallback(
+    (filename: string): boolean => hasStoreFile(filename),
+    [],
+  );
 
   const clearMeshFiles = useCallback(() => {
-    meshFilesRef.current.clear();
+    clearStore();
   }, []);
 
   return (

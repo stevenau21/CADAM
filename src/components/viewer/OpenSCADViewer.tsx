@@ -14,17 +14,8 @@ import { cn } from '@/lib/utils';
 import { MeshFilesContext } from '@/contexts/MeshFilesContext';
 import { createDXFProjectionCode } from '@/utils/dxfUtils';
 import { DxfExporter } from '@/utils/downloadUtils';
-
-// Extract import() filenames from OpenSCAD code
-function extractImportFilenames(code: string): string[] {
-  const importRegex = /import\s*\(\s*"([^"]+)"\s*\)/g;
-  const filenames: string[] = [];
-  let match;
-  while ((match = importRegex.exec(code)) !== null) {
-    filenames.push(match[1]);
-  }
-  return filenames;
-}
+import { extractImportFilenames } from '@/utils/scadImports';
+import { resolveMeshFile } from '@/worker/meshFileStore';
 
 // Brand-fallback `color` arrives as a CSS hex string (e.g. "#00A6FF") since
 // it's also handed to react-three-fiber's <meshStandardMaterial color>. The
@@ -97,12 +88,17 @@ export function OpenSCADPreview({
       if (!meshFilesCtx) return;
 
       for (const filename of importedFiles) {
-        const meshContent = meshFilesCtx.getMeshFile(filename);
+        // Fall back to the bare filename: models routinely emit
+        // import("/uploads/part.stl") for a blob keyed as "part.stl".
+        const meshContent =
+          meshFilesCtx.getMeshFile(filename) ?? resolveMeshFile(filename);
         const writtenBlob = writtenFilesRef.current.get(filename);
         const needsWrite =
           meshContent && (!writtenBlob || writtenBlob !== meshContent);
 
         if (needsWrite && meshContent) {
+          // Write under the path the code actually names so import() resolves
+          // it; the worker creates any missing parent directories.
           await writeFile(filename, meshContent);
           writtenFilesRef.current.set(filename, meshContent);
         }
