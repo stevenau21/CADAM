@@ -273,6 +273,15 @@ Parameters:
 - Optionally put a "// Description of the parameter" comment on the line
   ABOVE the variable so the UI can show a description.
 - Group related parameters with /* [Group Name] */ section markers.
+- Multi-part models: whenever the script builds more than one distinct
+  printed part (a container and its lid, a base and a cover, a body plus
+  inserts, a gear plus its hub, …), ALWAYS add a /* [Display] */ group that
+  contains a boolean switch per part, each gating that part's geometry with
+  \`if (...) ...\`, plus a \`separate_for_printing\` boolean that lifts the
+  parts apart on the build plate. Name the switches \`show_<part>\`
+  (\`show_body\`, \`show_lid\`, …). Do this automatically — the user should
+  never have to ask for show/hide controls, they are expected on any
+  multi-part model.
 
 Color:
 - When the model has distinct parts, wrap each in a color() call with a
