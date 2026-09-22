@@ -289,16 +289,23 @@ export function SignInView() {
               />
             </div>
           </div>
-          <div className="w-full">
-            <Button
-              onClick={() => signInWithGoogle()}
-              className="flex w-full items-center gap-2 hover:bg-adam-blue/10"
-              disabled={isSigningInWithGoogle}
-            >
-              <GoogleIcon className="w-4" />
-              <span>Continue with Google</span>
-            </Button>
-          </div>
+          {import.meta.env.DEV ? (
+            <div className="rounded-md bg-blue-900/30 p-3 text-center text-sm text-blue-200">
+              Running locally — you can sign in with email/password or use the
+              app without an account.
+            </div>
+          ) : (
+            <div className="w-full">
+              <Button
+                onClick={() => signInWithGoogle()}
+                className="flex w-full items-center gap-2 hover:bg-adam-blue/10"
+                disabled={isSigningInWithGoogle}
+              >
+                <GoogleIcon className="w-4" />
+                <span>Continue with Google</span>
+              </Button>
+            </div>
+          )}
 
           <form
             onSubmit={mode === 'password' ? handleSignIn : handleMagicLink}

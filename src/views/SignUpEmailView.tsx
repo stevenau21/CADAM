@@ -127,16 +127,23 @@ export function SignUpEmailView() {
               Create Account
             </h1>
           </div>
-          <div className="w-full py-2">
-            <Button
-              onClick={() => signInWithGoogle()}
-              className="flex w-full items-center gap-2 hover:bg-adam-blue/10"
-              disabled={isSigningInWithGoogle}
-            >
-              <GoogleIcon className="w-4" />
-              <span>Continue with Google</span>
-            </Button>
-          </div>
+          {import.meta.env.DEV ? (
+            <div className="rounded-md bg-blue-900/30 p-3 text-center text-sm text-blue-200">
+              Running locally — sign up with email/password or use the app
+              without an account.
+            </div>
+          ) : (
+            <div className="w-full py-2">
+              <Button
+                onClick={() => signInWithGoogle()}
+                className="flex w-full items-center gap-2 hover:bg-adam-blue/10"
+                disabled={isSigningInWithGoogle}
+              >
+                <GoogleIcon className="w-4" />
+                <span>Continue with Google</span>
+              </Button>
+            </div>
+          )}
 
           <form onSubmit={handleSignUp} className="space-y-6">
             <div className="space-y-2">

@@ -85,9 +85,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const {
           data: { session },
         } = await supabase.auth.refreshSession();
-        setSession(session);
-        localStorage.setItem('session', JSON.stringify(session));
-        setUser(session?.user ?? null);
+        if (session) {
+          setSession(session);
+          localStorage.setItem('session', JSON.stringify(session));
+          setUser(session.user ?? null);
+        } else if (import.meta.env.DEV) {
+          // Local dev convenience: skip the sign-in wall and use an anonymous
+          // Supabase session so storage/chat features work out of the box.
+          const { data: anonSession, error: anonError } =
+            await supabase.auth.signInAnonymously();
+          if (anonError) {
+            // eslint-disable-next-line no-console
+            console.warn('Anonymous sign-in failed:', anonError.message);
+          } else {
+            setSession(anonSession.session);
+            localStorage.setItem(
+              'session',
+              JSON.stringify(anonSession.session),
+            );
+            setUser(anonSession.session?.user ?? null);
+          }
+        }
       } finally {
         setIsLoading(false);
       }

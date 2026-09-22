@@ -4,11 +4,14 @@
 # working directory name when running `supabase init`.
 project_id = "cadam"
 
+[auth]
+enable_anonymous_sign_ins = true
+
 [auth.email]
 enable_signup = true
 
 [auth.external.google]
-enabled = true
+enabled = false
 client_id = "env(GOOGLE_CLIENT_ID)"
 secret = "env(GOOGLE_SECRET)"
 
