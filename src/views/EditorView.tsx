@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/popover';
 import { ShareContent } from '@/components/ui/ShareContent';
 import { OpenSCADPreview } from '@/components/viewer/OpenSCADViewer';
+import { useMeshFileHydration } from '@/hooks/useMeshFileHydration';
 import { MeshPreview } from '@/components/viewer/MeshPreview';
 import Loader from '@/components/viewer/Loader';
 import { useAuth } from '@/contexts/AuthContext';
@@ -244,6 +245,11 @@ function ConversationEditor() {
     () => branchForLeaf(leafId),
     [branchForLeaf, leafId],
   );
+
+  // Re-fetch any STL this conversation attached into the shared mesh store.
+  // Without this, `import("part.stl")` fails after a reload because the blob
+  // only ever lived in browser memory.
+  const meshFilesVersion = useMeshFileHydration(conversation, initialBranch);
 
   const updateSelectedModel = useCallback(
     (nextModel: Model) => {
@@ -732,6 +738,7 @@ function ConversationEditor() {
               color="#00A6FF"
               onOutputChange={setCurrentOutput}
               onDxfExportChange={handleDxfExporterChange}
+              meshFilesVersion={meshFilesVersion}
             />
           ) : activePreview?.type === 'mesh' ? (
             <MeshPreview meshId={activePreview.meshId} />
@@ -754,6 +761,7 @@ function ConversationEditor() {
               onDxfExportChange={handleDxfExporterChange}
               isMobile={true}
               backgroundColor="#212121"
+              meshFilesVersion={meshFilesVersion}
             />
           ) : activePreview?.type === 'mesh' ? (
             <MeshPreview meshId={activePreview.meshId} />

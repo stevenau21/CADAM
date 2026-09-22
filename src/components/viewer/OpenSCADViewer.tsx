@@ -34,6 +34,10 @@ interface OpenSCADPreviewProps {
   fixError?: (error: OpenSCADError) => void;
   isMobile?: boolean;
   backgroundColor?: string;
+  // Bumps when mesh bytes are re-hydrated from storage after a reload. The
+  // first compile on mount races that download and fails with a missing
+  // import file, so the compile is re-run when this changes.
+  meshFilesVersion?: number;
 }
 
 export function OpenSCADPreview({
@@ -44,6 +48,7 @@ export function OpenSCADPreview({
   fixError,
   isMobile,
   backgroundColor,
+  meshFilesVersion,
 }: OpenSCADPreviewProps) {
   const {
     compileScad,
@@ -121,7 +126,7 @@ export function OpenSCADPreview({
     };
 
     compileWithMeshFiles();
-  }, [scadCode, compileScad, prepareMeshFiles]);
+  }, [scadCode, compileScad, prepareMeshFiles, meshFilesVersion]);
 
   // Register a parent-owned DXF exporter for the current SCAD code. The export
   // runs only when the user chooses DXF from the download menu.

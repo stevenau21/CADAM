@@ -33,6 +33,9 @@ let workerInstance: Worker | null = null;
 
 function getToolWorker(): Worker {
   if (workerInstance) return workerInstance;
+  // A fresh worker starts with an empty WASM filesystem, so any paths
+  // recorded against the previous instance are meaningless.
+  writtenMeshPaths.clear();
   workerInstance = new Worker(new URL('./worker.ts', import.meta.url), {
     type: 'module',
   });
