@@ -51,7 +51,7 @@ export function PromptView() {
 
   const [type, setType] = useState<'parametric' | 'creative'>('parametric');
 
-  const [model, setModel] = useState<Model>('google/gemini-3.8-flash');
+  const [model, setModel] = useState<Model>('openai/glm-5.3');
 
   const handleTypeChange = (newType: 'parametric' | 'creative') => {
     setType(newType);

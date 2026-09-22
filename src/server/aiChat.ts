@@ -454,11 +454,22 @@ function createChatProviders(): ChatProviders {
       return google;
     },
     openai: () => {
-      openai ??= createOpenAI({
-        apiKey: env('OPENAI_API_KEY') || 'ollama',
-        baseURL:
-          env('OPENAI_BASE_URL').replace(/\/$/, '') || 'https://ollama.com/v1',
-      });
+      if (!openai) {
+        const baseURL =
+          env('OPENAI_BASE_URL').replace(/\/$/, '') || 'https://ollama.com/v1';
+        const apiKey = env('OPENAI_API_KEY');
+        // A local Ollama instance needs no key; a cloud gateway (Ollama
+        // Cloud, etc.) does. Fail with a clear message rather than sending
+        // a bogus bearer token and surfacing "invalid api key" from upstream.
+        const isLocal =
+          /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/.test(
+            baseURL,
+          );
+        if (!apiKey && !isLocal) {
+          throw new Error(`OPENAI_API_KEY is not set (needed for ${baseURL})`);
+        }
+        openai = createOpenAI({ apiKey: apiKey || 'ollama', baseURL });
+      }
       return openai;
     },
     openrouter: () => {
