@@ -90,20 +90,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem('session', JSON.stringify(session));
           setUser(session.user ?? null);
         } else if (import.meta.env.DEV) {
-          // Local dev convenience: skip the sign-in wall and use an anonymous
-          // Supabase session so storage/chat features work out of the box.
-          const { data: anonSession, error: anonError } =
-            await supabase.auth.signInAnonymously();
-          if (anonError) {
+          // Local dev convenience: skip the sign-in wall and use a shared
+          // local test account so storage/chat features work out of the box.
+          const { data: credSession, error: credError } =
+            await supabase.auth.signInWithPassword({
+              email: 'local-dev@example.com',
+              password: 'localdev123',
+            });
+          if (credError) {
             // eslint-disable-next-line no-console
-            console.warn('Anonymous sign-in failed:', anonError.message);
+            console.warn('Local dev auto-sign-in failed:', credError.message);
           } else {
-            setSession(anonSession.session);
+            setSession(credSession.session);
             localStorage.setItem(
               'session',
-              JSON.stringify(anonSession.session),
+              JSON.stringify(credSession.session),
             );
-            setUser(anonSession.session?.user ?? null);
+            setUser(credSession.session?.user ?? null);
           }
         }
       } finally {
