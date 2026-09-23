@@ -92,6 +92,19 @@ Rules:
 - Every feature needs a unique id; later features refer to earlier ids by name.
 - The section view shows the interior. Judge interior features (funnel, dish,
   spout, wall thickness) from it, not from the assembled exterior.
+- If the SOURCE has a section, cutaway or transparent panel, READ it: it is the
+  only place wall thickness, cavity depth, bore diameters and internal profiles
+  exist. An exterior render cannot answer an interior question, so never report
+  an interior difference you did not see in a section.
+- If the SOURCE shows the same object more than once, those are views of ONE
+  object, not several. Do not report a difference that is really just another
+  angle.
+- Ignore anything in the SOURCE that is not the part itself: liquid or contents,
+  background, floor, shadows, reflections. Never ask for those as geometry.
+- You cannot measure from an image, and neither can anyone else. Report
+  PROPORTION as a fraction of the whole ("the ribs stop at about 72% of the
+  height") rather than inventing millimetres, and let the plan derive real sizes
+  from the parameters.
 - If a render looks correct, return an empty differences list and an empty patch.
 - Be specific: name the part and the amount ("the ribs stop at 60mm but should
   run to 74mm"). Never say vague things like "looks different".
