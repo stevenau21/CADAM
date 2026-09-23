@@ -234,6 +234,40 @@ def _profile(feat: dict, env: dict[str, float], where: str):
         # align=None keeps the given coordinates absolute instead of recentring,
         # which matters because profiles are positioned by their own numbers.
         sketch = Polygon(*pts, align=None)
+    elif op == "sketch.path":
+        raw_start = feat.get("start")
+        if not isinstance(raw_start, list) or len(raw_start) != 2:
+            raise PlanError(f"{where}: start must be [x, y]")
+        segments = feat.get("segments") or []
+        if len(segments) < 2:
+            raise PlanError(f"{where}: segments needs at least 2 entries")
+        # Build a wire from exact lines and arcs, then close it into a face.
+        from build123d import Curve, Line, RadiusArc, make_face  # noqa: PLC0415
+
+        cursor = (
+            _num(raw_start[0], env, f"{where}.start[0]"),
+            _num(raw_start[1], env, f"{where}.start[1]"),
+        )
+        edges = []
+        for i, seg in enumerate(segments):
+            target = seg.get("to")
+            if not isinstance(target, list) or len(target) != 2:
+                raise PlanError(f"{where}: segments[{i}].to must be [x, y]")
+            end = (
+                _num(target[0], env, f"{where}.segments[{i}].to[0]"),
+                _num(target[1], env, f"{where}.segments[{i}].to[1]"),
+            )
+            if seg.get("type") == "arc":
+                radius = _num(seg["radius"], env, f"{where}.segments[{i}].radius")
+                if radius <= 0:
+                    raise PlanError(f"{where}: segments[{i}].radius must be > 0")
+                signed = -radius if seg.get("clockwise") else radius
+                edges.append(RadiusArc(cursor, end, signed))
+            else:
+                edges.append(Line(cursor, end))
+            cursor = end
+        wire = Curve() + edges
+        sketch = make_face(wire)
     else:
         raise PlanError(f"{where}: not a sketch op")
 
@@ -332,6 +366,22 @@ def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
             elif op == "import.step":
                 path = resolve_import(feat["file"])
                 imported = import_step(path)
+                # Image-to-CAD models arrive in normalised units. scale_to takes
+                # a real dimension for the largest axis and works out the factor,
+                # which is one multiplication but easy to get wrong by hand.
+                scale = feat.get("scale")
+                if feat.get("scale_to") is not None:
+                    target = _num(feat["scale_to"], env, f"{where}.scale_to")
+                    bb = imported.bounding_box()
+                    biggest = max(bb.size.X, bb.size.Y, bb.size.Z)
+                    if biggest <= 0:
+                        raise PlanError(f"{where}: imported model has zero size")
+                    scale = target / biggest
+                if scale is not None:
+                    factor = _num(scale, env, f"{where}.scale")
+                    if factor <= 0:
+                        raise PlanError(f"{where}: scale must be > 0")
+                    imported = imported.scale(factor)
                 at = feat.get("at")
                 if at is not None:
                     if len(at) != 3:

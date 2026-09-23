@@ -118,6 +118,38 @@ class SketchPolygon(_Sketch):
     points: list[list[NumberOrExpr]]
 
 
+class PathLine(_Strict):
+    type: Literal["line"]
+    to: list[NumberOrExpr]
+
+
+class PathArc(_Strict):
+    """An exact circular arc from the current point to `to`.
+
+    Kept as radius + direction rather than a polyline on purpose: a tessellated
+    arc is no longer an arc, so the geometry would no longer be exact and a
+    downstream CAD program could not dimension or re-fit it.
+    """
+
+    type: Literal["arc"]
+    to: list[NumberOrExpr]
+    radius: NumberOrExpr
+    clockwise: bool = False
+
+
+class SketchPath(_Sketch):
+    """A closed profile built from lines and exact arcs.
+
+    This is the representation image-to-CAD models emit (GenCAD's vocabulary is
+    line | arc | circle), so it is the natural landing place for anything that
+    arrives as a curve sequence rather than as a rectangle.
+    """
+
+    op: Literal["sketch.path"]
+    start: list[NumberOrExpr]
+    segments: list[Annotated[Union[PathLine, PathArc], Field(discriminator="type")]]
+
+
 class Extrude(_Feature):
     op: Literal["extrude"]
     profile: str
@@ -150,12 +182,19 @@ class ImportStep(_Feature):
     `file` is resolved against the service's import roots and rejected if it
     escapes them -- a plan is model output, and must not be able to read
     arbitrary paths.
+
+    `scale` exists for image-to-CAD models, which are generated in normalised
+    units (a model fits inside a unit box, not in millimetres). Supplying the
+    factor, or `scale_to` a target dimension, is how such a model is brought to
+    a real size before anything is measured or fitted against it.
     """
 
     op: Literal["import.step"]
     file: str
     at: list[NumberOrExpr] | None = None
     rotate: list[NumberOrExpr] | None = None
+    scale: NumberOrExpr | None = None
+    scale_to: NumberOrExpr | None = None
 
 
 class Boolean(_Feature):
@@ -238,6 +277,7 @@ Feature = Annotated[
         SketchRect,
         SketchCircle,
         SketchPolygon,
+        SketchPath,
         Extrude,
         Revolve,
         Loft,
@@ -277,6 +317,7 @@ def op_names() -> list[str]:
         "sketch.rect",
         "sketch.circle",
         "sketch.polygon",
+        "sketch.path",
         "extrude",
         "revolve",
         "loft",

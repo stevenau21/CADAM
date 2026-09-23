@@ -1,0 +1,82 @@
+{
+  "units": "mm",
+  "description": "Exact-arc test: a rounded slot built from two arcs and two lines, extruded. Proves sketch.path keeps arcs analytic instead of polygonising them.",
+  "parameters": [
+    {
+      "name": "slot_len",
+      "value": 60,
+      "min": 10,
+      "max": 200,
+      "step": 1,
+      "label": "Slot length"
+    },
+    {
+      "name": "slot_w",
+      "value": 24,
+      "min": 4,
+      "max": 100,
+      "step": 1,
+      "label": "Slot width"
+    },
+    {
+      "name": "slot_h",
+      "value": 10,
+      "min": 1,
+      "max": 60,
+      "step": 0.5,
+      "label": "Thickness"
+    }
+  ],
+  "derived": [
+    {
+      "name": "r",
+      "expr": "slot_w / 2"
+    },
+    {
+      "name": "x1",
+      "expr": "slot_len/2 - r"
+    },
+    {
+      "name": "x0",
+      "expr": "-(slot_len/2 - r)"
+    }
+  ],
+  "features": [
+    {
+      "op": "sketch.path",
+      "id": "slot_sk",
+      "plane": "XY",
+      "start": ["x0", "-r"],
+      "segments": [
+        {
+          "type": "line",
+          "to": ["x1", "-r"]
+        },
+        {
+          "type": "arc",
+          "to": ["x1", "r"],
+          "radius": "r",
+          "clockwise": true
+        },
+        {
+          "type": "line",
+          "to": ["x0", "r"]
+        },
+        {
+          "type": "arc",
+          "to": ["x0", "-r"],
+          "radius": "r",
+          "clockwise": true
+        }
+      ]
+    },
+    {
+      "op": "extrude",
+      "id": "slot",
+      "profile": "slot_sk",
+      "height": "slot_h"
+    }
+  ],
+  "checks": [],
+  "result": "slot"
+}
