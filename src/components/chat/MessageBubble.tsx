@@ -1,3 +1,7 @@
+import {
+  BrepBuildCard,
+  type BrepOutput,
+} from '@/components/chat/BrepBuildCard';
 import { MeshImagePreview } from '@/components/viewer/MeshImagePreview';
 import { StreamingCodeBlock } from '@/components/chat/StreamingCodeBlock';
 import { ChatReasoning } from '@/components/chat/ChatReasoning';
@@ -443,6 +447,17 @@ function AssistantBubble({
     return buildIndex;
   }, [conversation.type, message.parts]);
 
+  // Only the LAST B-Rep build is displayed, matching how the OpenSCAD path shows
+  // the current artefact rather than every intermediate revision.
+  const lastBrepBuildIndex = useMemo(() => {
+    if (conversation.type !== 'parametric') return -1;
+    let buildIndex = -1;
+    message.parts.forEach((part, index) => {
+      if (part.type === 'tool-build_brep_model') buildIndex = index;
+    });
+    return buildIndex;
+  }, [conversation.type, message.parts]);
+
   const text = useMemo(
     () =>
       conversation.type === 'parametric' && lastParametricBuildIndex !== -1
@@ -535,6 +550,42 @@ function AssistantBubble({
                 key={index}
                 text={part.text}
                 isStreaming={part.state === 'streaming'}
+              />
+            );
+          }
+
+          if (part.type === 'tool-build_brep_model') {
+            // The exact-engine result. Unlike the OpenSCAD path there is nothing
+            // to compile in the browser, so the card is a straight render of
+            // what the server returned: the geometry, the measured stats, the
+            // verified fits, and downloadable STEP/STL.
+            if (index !== lastBrepBuildIndex) return null;
+            if (part.state === 'input-streaming') {
+              return (
+                <div key={index} className="text-xs text-gray-400">
+                  Planning an exact model…
+                </div>
+              );
+            }
+            if (part.state === 'output-error') {
+              return (
+                <div key={index} className="text-xs text-amber-400">
+                  {part.errorText ?? 'The B-Rep build failed.'}
+                </div>
+              );
+            }
+            if (part.state !== 'output-available') return null;
+            return (
+              <BrepBuildCard
+                key={index}
+                title={
+                  typeof part.input === 'object' &&
+                  part.input !== null &&
+                  'title' in part.input
+                    ? String((part.input as { title?: unknown }).title ?? '')
+                    : undefined
+                }
+                output={part.output as BrepOutput}
               />
             );
           }

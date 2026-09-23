@@ -1,5 +1,5 @@
 import { useNavigate, Link } from '@tanstack/react-router';
-import { LogIn } from 'lucide-react';
+import { LogIn, Ruler } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,6 +16,7 @@ import { NewProductBanner } from '@/components/NewProductBanner';
 import { FreePlanTrialPill } from '@/components/FreePlanTrialPill';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { cn } from '@/lib/utils';
+import { modelSeesImages } from '@shared/models';
 import { SelectedItemsContext } from '@/contexts/SelectedItemsContext';
 import posthog from 'posthog-js';
 import * as Sentry from '@sentry/react';
@@ -53,14 +54,35 @@ export function PromptView() {
 
   const [model, setModel] = useState<Model>('openai/glm-5.3');
 
+  /**
+   * Exact B-Rep engine. Off is the OpenSCAD path CADAM ships with: the browser
+   * compiles to a mesh and you get an STL. On routes the build to the local
+   * B-Rep service, which returns analytic geometry, a real STEP file, verified
+   * fit checks, and a render the model is shown so it can correct itself.
+   */
+  const [brepMode, setBrepMode] = useState(false);
+
+  /** The B-Rep loop shows the model its own render, so the planner must accept
+   * images. glm-5.3 explicitly refuses them; glm-5.3-flash is the same family
+   * and does not. */
+  const BREP_DEFAULT_MODEL: Model = 'openai/glm-5.3-flash';
+
   const handleTypeChange = (newType: 'parametric' | 'creative') => {
     setType(newType);
     // Reset model to the default for the new type
     if (newType === 'creative') {
       setModel('quality');
+      setBrepMode(false);
     } else {
       setModel('google/gemini-3.8-flash');
     }
+  };
+
+  const handleBrepToggle = (on: boolean) => {
+    setBrepMode(on);
+    if (!on) return;
+    setType('parametric');
+    if (!modelSeesImages(model)) setModel(BREP_DEFAULT_MODEL);
   };
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -155,6 +177,9 @@ export function PromptView() {
             type: type,
             settings: {
               model: model,
+              // Only present when the exact engine is chosen; absent keeps every
+              // existing conversation on the OpenSCAD path.
+              ...(brepMode ? { engine: 'brep' as const } : {}),
             },
           },
         ])
@@ -303,6 +328,39 @@ export function PromptView() {
               <SelectedItemsContext.Provider
                 value={{ images, setImages, mesh, setMesh }}
               >
+                {/* Engine switch. Only meaningful for parametric work — the
+                    creative path builds meshes, not CAD. */}
+                {type === 'parametric' && (
+                  <div className="mb-2 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleBrepToggle(!brepMode)}
+                      aria-pressed={brepMode}
+                      className={cn(
+                        'flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors',
+                        brepMode
+                          ? 'border-adam-blue/60 bg-adam-blue/15 text-white'
+                          : 'border-gray-600/60 bg-adam-bg-secondary-dark text-gray-300 hover:text-white',
+                      )}
+                      title={
+                        brepMode
+                          ? 'Exact B-Rep geometry: analytic surfaces, real STEP export, verified fits'
+                          : 'Switch to the exact B-Rep engine (STEP output, verified fits)'
+                      }
+                    >
+                      <Ruler className="h-3.5 w-3.5" />
+                      <span>
+                        {brepMode ? 'Exact engine (STEP)' : 'OpenSCAD engine'}
+                      </span>
+                    </button>
+                    {brepMode && !modelSeesImages(model) && (
+                      <span className="text-xs text-amber-400">
+                        This engine shows the model a render of its own work —
+                        pick a vision model (e.g. GLM 5.3 Flash).
+                      </span>
+                    )}
+                  </div>
+                )}
                 <TextAreaChat
                   onSubmit={handleGenerate}
                   conversation={{

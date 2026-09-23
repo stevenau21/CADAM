@@ -82,6 +82,16 @@ export type GenerationStatus = Database['public']['Enums']['generation-status'];
 export type ConversationSettings = {
   model?: Model;
   /**
+   * Which CAD engine this conversation runs on.
+   *
+   * `openscad` (the default) compiles in the browser to a mesh and exports STL.
+   * `brep` calls the local B-Rep service instead: exact analytic geometry, real
+   * STEP output, verified fit checks, and the model is shown a render of its own
+   * work. Stored here rather than as a new `conversation-type` enum value so
+   * switching engines needs no migration.
+   */
+  engine?: 'openscad' | 'brep';
+  /**
    * Per-conversation follow-up suggestions rendered as pills above the
    * chat input. Regenerated server-side after each non-tool-call
    * assistant turn — see `emitConversationSuggestions` in
