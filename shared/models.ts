@@ -29,9 +29,17 @@ export function normalizeModelId(model: Model): Model {
  * and `minimax-m3` all describe a test image correctly.
  */
 export const VISION_CAPABLE_MODELS: ReadonlySet<string> = new Set([
+  // Verified against the live endpoint by asking each model to describe a test
+  // image. Anything in the picker that is NOT listed here is treated as blind,
+  // which means the B-Rep render is silently dropped from the tool result -- so
+  // a model added to the picker must be added here too.
+  'openai/mistral-large-3:675b', // 675B, and clean tool-calling
+  'openai/qwen3.5:397b',
+  'openai/kimi-k3',
+  'openai/kimi-k2.7-code',
+  'openai/deepseek-v4.1-flash',
   'openai/glm-5.3-flash',
   'openai/gemma4:31b',
-  'openai/qwen3.5:397b',
   'openai/minimax-m3',
   'openai/minimax-m2.7',
   'openai/gemma4',

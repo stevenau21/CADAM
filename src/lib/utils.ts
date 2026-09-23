@@ -237,6 +237,25 @@ export function getInitials(fullName: string | null) {
 
 export const PARAMETRIC_MODELS: ModelConfig[] = [
   {
+    id: 'openai/mistral-large-3:675b',
+    name: 'Mistral Large 3 (Ollama Cloud)',
+    description:
+      'Largest vision model on the Ollama Cloud key — 675B parameters',
+    provider: 'Mistral',
+    supportsTools: true,
+    supportsThinking: true,
+    supportsVision: true,
+  },
+  {
+    id: 'openai/qwen3.5:397b',
+    name: 'Qwen 3.5 397B (Ollama Cloud)',
+    description: 'Very large vision model via Ollama Cloud',
+    provider: 'Qwen',
+    supportsTools: true,
+    supportsThinking: true,
+    supportsVision: true,
+  },
+  {
     id: 'openai/glm-5.3',
     name: 'GLM 5.3 (Ollama Cloud)',
     description: 'Z.AI model with strong agentic coding and reasoning',
