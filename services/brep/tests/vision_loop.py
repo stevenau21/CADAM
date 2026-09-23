@@ -68,6 +68,11 @@ fix the PLAN.
 
 Rules:
 - Units are mm. Z is up. The build plate is Z = 0.
+- AXES, so orientation is never ambiguous: X = width (left-right), Y = depth
+  (front-back), Z = height. A tunnel through "front to back" runs along Y. If a
+  requirement uses a word like "front" or "side", map it to an axis yourself and
+  state the axis in the difference -- never report an orientation problem twice
+  for the same feature set.
 - Reply with ONE json object and nothing else, in exactly this shape:
 
   {"differences": ["specific, geometric, with amounts"],
@@ -334,6 +339,8 @@ def main() -> int:
     applied: list[str] = []
     history = []
     carry_error = ""
+    seen: dict[str, int] = {}
+    last_touched: set[str] = set()
 
     for it in range(1, args.iters + 1):
         print("=" * 70)
@@ -394,6 +401,22 @@ def main() -> int:
             print("    - %s" % d)
         history.append({"iteration": it, "differences": diffs})
 
+        # OSCILLATION GUARD. A critic with no ground truth for "front" can report
+        # the same orientation problem forever while the geometry flips back and
+        # forth. If every difference this pass was already reported, we are in a
+        # loop, and another patch will not get us out of it.
+        def norm(text: str) -> str:
+            return re.sub(r"[^a-z0-9 ]", "", text.lower())[:90]
+
+        fresh = [d for d in diffs if seen.get(norm(d), 0) == 0]
+        if diffs and not fresh:
+            print("\n  OSCILLATION: every difference repeats a previous pass.")
+            print("  Stopping rather than looping. Resolve the ambiguity in the brief")
+            print("  (name the axis explicitly) or in the plan, then re-run.")
+            break
+        for d in diffs:
+            seen[norm(d)] = seen.get(norm(d), 0) + 1
+
         if not diffs and not any(patch.values()):
             print("\n  converged: no differences left.")
             break
@@ -403,6 +426,17 @@ def main() -> int:
         if not notes:
             print("\n  patch was empty -- nothing to apply, stopping.")
             break
+
+        # A patch that rewrites features it already rewrote is a second signal of
+        # oscillation, even when the wording of the differences changed.
+        touched = {f.get("id") for f in (patch.get("set_features") or []) if isinstance(f, dict)}
+        touched |= set(patch.get("remove_features") or [])
+        touched |= {f.get("id") for f in (patch.get("append_features") or []) if isinstance(f, dict)}
+        overlap = touched & last_touched
+        if overlap:
+            print("  note: this patch touches features already changed last pass: %s"
+                  % ", ".join(sorted(x for x in overlap if x)))
+        last_touched = touched
 
         # GATE: a revision must still compile AND keep every fit check passing.
         # The model may change geometry; it may not silently break the thing the
