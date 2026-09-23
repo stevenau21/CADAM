@@ -1143,6 +1143,16 @@ function brepTools({
             glbBase64: (result.files as Record<string, string>)[k],
           }));
 
+        // Diagnostic views rendered by the service: a mid-plane section and each
+        // component on its own. These are what let the model compare against a
+        // reference image instead of judging one isometric render.
+        const views = Object.keys(result.files ?? {})
+          .filter((k) => k.startsWith('view:'))
+          .map((k) => ({
+            label: k.slice('view:'.length),
+            imageBase64: (result.files as Record<string, string>)[k],
+          }));
+
         return {
           status,
           message: bits.join('\n') || 'Compiled.',
@@ -1155,6 +1165,7 @@ function brepTools({
             : undefined,
           partNames: partNames.length ? partNames : undefined,
           parts: partGlbs.length ? partGlbs : undefined,
+          views: views.length ? views : undefined,
         };
       },
       async toModelOutput({
@@ -1170,26 +1181,44 @@ function brepTools({
           output.partNames?.length
             ? 'Those names are the components the user can toggle in the viewer. If the request implies a different split, or the user asks to combine or separate parts, edit the plan parts map -- the toggles follow it automatically, so do NOT ask the user to do it by hand.'
             : '',
-          output.renderDataUrl && canSee
-            ? 'A render of the compiled model is attached — inspect it against the user request from every visible angle.'
-            : 'No render was attached; judge only from the numbers above.',
+          output.views?.length
+            ? `Views attached: ${output.views.map((v) => v.label).join(', ')}, plus the assembled render. The section view is the ONLY one that shows wall thickness, cavities and interior fit. If the user supplied a reference image, compare EVERY view against it -- shape, proportions, which features exist, and how many parts there are -- and revise the plan if any view disagrees. Do not finalise because one view looks plausible.`
+            : output.renderDataUrl && canSee
+              ? 'A render of the compiled model is attached — inspect it against the user request from every visible angle.'
+              : 'No render was attached; judge only from the numbers above.',
         ]
           .filter(Boolean)
           .join('\n');
 
-        if (output.renderDataUrl && canSee) {
-          const base64 = output.renderDataUrl.split(',')[1] ?? '';
-          return {
-            type: 'content' as const,
-            value: [
-              { type: 'text' as const, text },
-              {
-                type: 'image-data' as const,
-                data: base64,
+        if (canSee) {
+          const images: Array<{
+            type: 'image-data';
+            data: string;
+            mediaType: string;
+          }> = [];
+          const base64 = output.renderDataUrl?.split(',')[1];
+          if (base64) {
+            images.push({
+              type: 'image-data',
+              data: base64,
+              mediaType: 'image/png',
+            });
+          }
+          for (const view of output.views ?? []) {
+            if (view.imageBase64) {
+              images.push({
+                type: 'image-data',
+                data: view.imageBase64,
                 mediaType: 'image/png',
-              },
-            ],
-          };
+              });
+            }
+          }
+          if (images.length) {
+            return {
+              type: 'content' as const,
+              value: [{ type: 'text' as const, text }, ...images],
+            };
+          }
         }
         return { type: 'text' as const, value: text };
       },

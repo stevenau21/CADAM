@@ -116,6 +116,15 @@ export const brepCompileOutputSchema = z.object({
   parts: z
     .array(z.object({ name: z.string(), glbBase64: z.string() }))
     .optional(),
+  /**
+   * Diagnostic views rendered by the service: `section` (a mid-plane cut) and
+   * `part_<name>` for each component. Attached to the tool result so the model
+   * judges the build on more than one isometric render — a single view can hide
+   * the entire interior.
+   */
+  views: z
+    .array(z.object({ label: z.string(), imageBase64: z.string() }))
+    .optional(),
 });
 
 /** Model IDs that can accept image input. `supportsVision` in lib/utils is the

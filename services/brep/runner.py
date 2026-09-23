@@ -93,6 +93,65 @@ def write_step(part, path) -> str:
     return "occt"
 
 
+def render_shape(shape, name, outputs, log) -> None:
+    """Mesh one shape to a PNG and record it under view:<name>.
+
+    Separate from render_view() because these are VIEWS for the model to judge,
+    not the single preview the user sees.
+    """
+    if shape is None or not os.path.exists(CADGEN):
+        return
+    stl = os.path.abspath(f"view_{name}.stl")
+    png = os.path.abspath(f"view_{name}.png")
+    try:
+        from build123d import export_stl  # noqa: PLC0415
+
+        with contextlib.redirect_stdout(log):
+            export_stl(shape, stl, tolerance=0.05)
+        proc = subprocess.run(
+            [CADGEN, "stl", "snapshot", stl, png], capture_output=True, timeout=420
+        )
+        if proc.returncode == 0 and os.path.exists(png):
+            outputs[f"view:{name}"] = {"path": png, "bytes": os.path.getsize(png)}
+    except Exception as exc:  # noqa: BLE001 - a missing view is not fatal
+        log.write(f"[view {name} failed] {type(exc).__name__}: {exc}\n")
+
+
+def render_views(compiled, part_map, outputs, log) -> None:
+    """Render what the model needs to JUDGE the build, not just one view.
+
+    A single isometric render can hide the whole interior, and a model judging
+    one view has no way to see wall thickness, a cavity, or whether two parts
+    actually mate. So render a comparable set:
+
+      view:section   a mid-plane cut, the only view that shows inside
+      view:part_*    each named component on its own
+      render         the assembled preview the user sees
+
+    These are what make the loop able to compare against the user's reference
+    image instead of guessing.
+    """
+    result = compiled.get("result")
+    if result is None:
+        return
+    try:
+        from build123d import Box, Pos  # noqa: PLC0415
+
+        bb = result.bounding_box()
+        span = max(bb.size.X, bb.size.Y, bb.size.Z) * 2 + 50
+        # A slab covering y > 0, so subtracting it leaves the y < 0 half and the
+        # cut face sits exactly on the mid-plane.
+        slab = Pos(0, span / 2, bb.center().Z) * Box(span * 2, span, span * 4)
+        with contextlib.redirect_stdout(log):
+            section = result - slab
+        render_shape(section, "section", outputs, log)
+    except Exception as exc:  # noqa: BLE001
+        log.write(f"[view section failed] {type(exc).__name__}: {exc}\n")
+
+    for name, fid in (part_map or {}).items():
+        render_shape(compiled["shapes"].get(fid), f"part_{name}"[:38], outputs, log)
+
+
 def export_all(part, log):
     """Export each format independently: one failing format must not lose the others."""
     from build123d import export_step, export_stl, export_gltf
@@ -251,7 +310,7 @@ def run_plan(path, log):
         "result_id": compiled["result_id"],
         "parts": parts,
     }
-    return compiled["result"], extra, symbols
+    return compiled["result"], extra, symbols, compiled, dict(plan.parts or {})
 
 
 def main() -> None:
@@ -276,14 +335,23 @@ def main() -> None:
     }
 
     try:
+        compiled = None
+        part_map = {}
         if mode == "--plan":
-            part, extra, _ = run_plan(src_path, log)
+            part, extra, _, compiled, part_map = run_plan(src_path, log)
         else:
             part, extra, _ = run_code(src_path, log)
         payload["extra"] = extra
         payload["stats"] = stats_for(part)
         payload["outputs"] = export_all(part, log)
         render_view(payload["outputs"], log)
+        if compiled is not None:
+            # Only the plan path has the named parts and the compiled shape map
+            # the extra diagnostic views need.
+            try:
+                render_views(compiled, part_map, payload["outputs"], log)
+            except Exception as exc:  # noqa: BLE001
+                log.write(f"[render_views failed] {type(exc).__name__}: {exc}\n")
         # fold the per-part files into outputs so the service ships them too
         for name, entry in (extra.get("parts") or {}).items():
             for kind, info in entry.items():
