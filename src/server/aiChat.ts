@@ -1125,6 +1125,15 @@ function brepTools({ model }: { model: Model }) {
           .filter((k) => k.startsWith('step:'))
           .map((k) => k.slice('step:'.length));
 
+        // Pair each component's GLB with its name so the viewer can show and
+        // hide parts individually.
+        const partGlbs = Object.keys(result.files ?? {})
+          .filter((k) => k.startsWith('glb:'))
+          .map((k) => ({
+            name: k.slice('glb:'.length),
+            glbBase64: (result.files as Record<string, string>)[k],
+          }));
+
         return {
           status,
           message: bits.join('\n') || 'Compiled.',
@@ -1136,6 +1145,7 @@ function brepTools({ model }: { model: Model }) {
             ? `data:image/png;base64,${result.files.render}`
             : undefined,
           partNames: partNames.length ? partNames : undefined,
+          parts: partGlbs.length ? partGlbs : undefined,
         };
       },
       async toModelOutput({
@@ -1147,6 +1157,9 @@ function brepTools({ model }: { model: Model }) {
           output.message,
           output.partNames?.length
             ? `Named parts exported separately: ${output.partNames.join(', ')}.`
+            : '',
+          output.partNames?.length
+            ? 'Those names are the components the user can toggle in the viewer. If the request implies a different split, or the user asks to combine or separate parts, edit the plan parts map -- the toggles follow it automatically, so do NOT ask the user to do it by hand.'
             : '',
           output.renderDataUrl && canSee
             ? 'A render of the compiled model is attached — inspect it against the user request from every visible angle.'

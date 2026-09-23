@@ -107,6 +107,15 @@ export const brepCompileOutputSchema = z.object({
   /** data: URL of the render, so the model can be shown its own geometry. */
   renderDataUrl: z.string().optional(),
   partNames: z.array(z.string()).optional(),
+  /**
+   * One entry per named component, with its own GLB. This is what makes the
+   * viewer's per-part show/hide possible: the toggles are derived from the
+   * plan's `parts` map, so when the model renames, splits or merges a component
+   * the checkboxes follow with no code change.
+   */
+  parts: z
+    .array(z.object({ name: z.string(), glbBase64: z.string() }))
+    .optional(),
 });
 
 /** Model IDs that can accept image input. `supportsVision` in lib/utils is the
