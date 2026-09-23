@@ -1066,7 +1066,15 @@ async function downloadAsBase64(
  * the model. The browser never has to know how the geometry was made, and the
  * vision loop needs no round trip through client state.
  */
-function brepTools({ model }: { model: Model }) {
+function brepTools({
+  model,
+  supabaseClient,
+  conversation,
+}: {
+  model: Model;
+  supabaseClient: SupabaseAnon;
+  conversation: ConversationAccess;
+}) {
   // The render is attached to the tool result so the model can look at its own
   // geometry. A model that cannot accept images would fail the whole request,
   // so check first and fall back to a numbers-only loop.
@@ -1187,6 +1195,73 @@ function brepTools({ model }: { model: Model }) {
       },
     },
     answer_user: chatTools.answer_user,
+    convert_image_to_cad: {
+      ...chatTools.convert_image_to_cad,
+      async execute({
+        imageId,
+        scale_to,
+      }: AppTools['convert_image_to_cad']['input']) {
+        // The MODEL decided this image was worth trying, because it can actually
+        // look at the image and judge. A failure is reported plainly and the
+        // model is expected to carry on building from the image itself.
+        if (!gencadAvailable()) {
+          return {
+            status: 'unavailable' as const,
+            message:
+              'No trained image-to-CAD model is installed locally. Build the model ' +
+              'yourself from the image.',
+          };
+        }
+
+        const safeId = imageId.replace(/\.[a-z0-9]+$/i, '');
+        const downloaded = await downloadAsBase64(
+          supabaseClient,
+          'images',
+          imageStoragePath(conversation.user_id, conversation.id, safeId),
+        );
+        if (!downloaded) {
+          return {
+            status: 'failed' as const,
+            message: `Could not read image ${imageId} from storage.`,
+          };
+        }
+
+        const extension = downloaded.mediaType.split('/')[1] ?? 'png';
+        const result = await gencadFromImage(
+          downloaded.base64,
+          extension,
+          scale_to ?? 80,
+          3,
+        );
+
+        if (!result.ok) {
+          return {
+            status: 'failed' as const,
+            message:
+              `${result.reason}. It only knows sketch-and-extrude parts, so this ` +
+              'image is outside what it handles. Build the model yourself from the ' +
+              'image, decomposing it into named parts.',
+          };
+        }
+
+        const biggest = Math.max(...result.normalisedSize, 0);
+        return {
+          status: 'success' as const,
+          message: [
+            `Converted to exact B-Rep: ${result.solids} solid(s), ${result.faces} face(s).`,
+            `It is in NORMALISED units — largest dimension ${biggest.toFixed(3)} units,`,
+            'not millimetres. Import it with:',
+            `  {"op": "import.step", "id": "from_image", "file": "${result.step.replace(/\\/g, '/')}", "scale_to": ${scale_to ?? '<real size in mm>'}}`,
+            'Then judge it: if it is too simple or missing features, build the model',
+            'yourself from the image instead.',
+          ].join('\n'),
+          stepPath: result.step,
+          normalisedSize: result.normalisedSize,
+          solids: result.solids,
+          faces: result.faces,
+        };
+      },
+    },
   };
 }
 
@@ -1350,91 +1425,6 @@ covering the lower half, then rotate 90 about X to stand it up.
 
 After a successful build, speak in the past tense and keep answer_user short.`;
 
-/**
- * If the user attached an image to a B-Rep conversation, try converting it to
- * exact geometry with GenCAD and hand the model the result.
- *
- * This is deliberately advisory. GenCAD is excellent on a simple part from a
- * clean CAD image and useless on a complex one (measured: a ribbed container
- * with a funnel and handle failed every sample at 42-56 commands against a
- * 60-command ceiling). So the note tells the model what it got AND tells it to
- * ignore the result and build from the image itself when the conversion is
- * poor or too simple for the request. A failure to convert is normal, never an
- * error, and never blocks the turn.
- */
-async function imageToBrepContext(
-  conversation: ConversationAccess,
-  supabaseClient: SupabaseAnon,
-  branchMessages: AppUIMessage[],
-): Promise<string> {
-  try {
-    // Only the newest user turn matters: an image from ten messages ago is not
-    // what "make this" refers to.
-    const lastUser = [...branchMessages]
-      .reverse()
-      .find((m) => m.role === 'user');
-    if (!lastUser) return '';
-
-    const imagePart = lastUser.parts.find(
-      (part) =>
-        part.type === 'file' &&
-        typeof part.mediaType === 'string' &&
-        part.mediaType.startsWith('image/') &&
-        typeof part.filename === 'string',
-    );
-    if (!imagePart || imagePart.type !== 'file' || !imagePart.filename)
-      return '';
-
-    const imageId = imageIdFromFilename(imagePart.filename);
-    if (!imageId) return '';
-
-    const downloaded = await downloadAsBase64(
-      supabaseClient,
-      'images',
-      imageStoragePath(conversation.user_id, conversation.id, imageId),
-    );
-    if (!downloaded) return '';
-
-    if (!gencadAvailable()) {
-      return (
-        '[image-to-CAD] The user attached an image. A trained image-to-CAD model ' +
-        'is not installed locally, so build the model from the image yourself.'
-      );
-    }
-
-    const extension = downloaded.mediaType.split('/')[1] ?? 'png';
-    const result = await gencadFromImage(downloaded.base64, extension, 80, 3);
-
-    if (!result.ok) {
-      return (
-        `[image-to-CAD] A trained image-to-CAD model was asked to convert the attached ` +
-        `image and could not (${result.reason}). That is expected for anything complex. ` +
-        `Build the model from the image yourself, decomposing it into named parts.`
-      );
-    }
-
-    const biggest = Math.max(...result.normalisedSize, 0);
-    return [
-      '[image-to-CAD] A trained image-to-CAD model converted the attached image to',
-      `exact B-Rep geometry: ${result.step}`,
-      `It contains ${result.solids} solid(s) and ${result.faces} face(s), and is in`,
-      `NORMALISED units -- its largest dimension is ${biggest.toFixed(3)} units, not`,
-      'millimetres, because a single image carries no scale. To use it:',
-      `  {"op": "import.step", "id": "from_image", "file": "${result.step.replace(/\\/g, '/')}", "scale_to": <the real size in mm>}`,
-      'Set scale_to to the size the user asked for. If they gave no size, pick a',
-      'sensible one for the object, state it, and expose it as a parameter.',
-      '',
-      'IMPORTANT: judge whether that geometry is actually good enough. It is a',
-      'reconstruction from one picture and it is often too simple, wrong, or',
-      'missing features. If it does not match the request, IGNORE it and build the',
-      'model yourself from the image, decomposing it into named parts with joints.',
-    ].join('\n');
-  } catch {
-    // Never let an image-conversion problem break a chat.
-    return '';
-  }
-}
-
 function chatModel(conversation: ConversationAccess, model: Model) {
   if (conversation.type === 'creative') {
     return 'anthropic/claude-sonnet-4.5';
@@ -1528,7 +1518,11 @@ export async function handleAiChatRequest(req: Request) {
     conversation.type === 'creative'
       ? creativeTools({ conversation, req, model: rawBody.model })
       : usesBrepEngine(conversation)
-        ? brepTools({ model: chatModel(conversation, rawBody.model) })
+        ? brepTools({
+            model: chatModel(conversation, rawBody.model),
+            supabaseClient,
+            conversation,
+          })
         : parametricTools({
             supabaseClient,
             previewPathForToolCall: (toolCallId) =>
@@ -1735,18 +1729,16 @@ export async function handleAiChatRequest(req: Request) {
     ? 'build_brep_model'
     : 'build_parametric_model';
 
-  // For the exact engine, an attached image is first offered to the trained
-  // image-to-CAD model. The result is advisory context, not a decision.
-  const imageContext = usesBrepEngine(conversation)
-    ? await imageToBrepContext(conversation, supabaseClient, branchMessages)
-    : '';
+  // An attached image is NOT converted automatically. The trained image-to-CAD
+  // model handles only simple parts from clean CAD renderings and costs 30-60s
+  // of GPU time, so running it on every image spends a minute to produce
+  // nothing. The model can SEE the image and decides -- it has the
+  // convert_image_to_cad tool for the images that suit it.
 
   const result = streamText({
     model: chatLanguageModel,
     providerOptions: chatProviderOptions,
-    system: imageContext
-      ? `${systemPrompt(conversation)}\n\n${imageContext}`
-      : systemPrompt(conversation),
+    system: systemPrompt(conversation),
     messages: modelMessages,
     tools,
     prepareStep: ({ stepNumber }) => {

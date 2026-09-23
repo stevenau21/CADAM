@@ -123,6 +123,38 @@ export const brepCompileOutputSchema = z.object({
  * some models in the picker reject images outright (glm-5.3 among them). */
 export const brepPlanToolName = 'build_brep_model' as const;
 
+/**
+ * Ask the trained image-to-CAD model to reconstruct an attached image as exact
+ * geometry.
+ *
+ * This is a TOOL, not something the server does automatically, and that is the
+ * point. The model can see the image, so it can tell whether the image is the
+ * kind of thing this works on: one simple part, drawn cleanly, like a CAD
+ * render or a technical drawing. It costs 30-60 seconds of GPU time, so calling
+ * it on a photo of a complex assembly is a minute spent to produce nothing.
+ */
+export const convertImageInputSchema = z.object({
+  imageId: z
+    .string()
+    .describe('Image id from the attached file part filename, e.g. "<id>.png"'),
+  scale_to: z
+    .number()
+    .optional()
+    .describe(
+      'Real size in mm for the model largest dimension. A single image carries ' +
+        'no scale, so this has to come from the user.',
+    ),
+});
+
+export const convertImageOutputSchema = z.object({
+  status: z.enum(['success', 'failed', 'unavailable']),
+  message: z.string(),
+  stepPath: z.string().optional(),
+  normalisedSize: z.array(z.number()).optional(),
+  solids: z.number().optional(),
+  faces: z.number().optional(),
+});
+
 export const chatTools = {
   build_parametric_model: tool({
     description:
@@ -151,6 +183,18 @@ export const chatTools = {
       'declared fit checks. Inspect the returned render before finalising.',
     inputSchema: brepPlanInputSchema,
     outputSchema: brepCompileOutputSchema,
+  }),
+  convert_image_to_cad: tool({
+    description:
+      'Ask a trained image-to-CAD model to reconstruct an attached image as exact ' +
+      'B-Rep geometry, returning a STEP file you can import.step. Use ONLY when the ' +
+      'attached image shows a single, relatively simple part drawn cleanly — a CAD ' +
+      'render or a technical drawing. It takes 30-60 seconds and it will fail on ' +
+      'photographs, multi-view sheets, assemblies, or anything with many features; ' +
+      'for those, build the model yourself from the image instead. Results arrive in ' +
+      'normalised units, so scale_to is required.',
+    inputSchema: convertImageInputSchema,
+    outputSchema: convertImageOutputSchema,
   }),
 };
 
