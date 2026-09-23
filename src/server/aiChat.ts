@@ -1475,6 +1475,13 @@ model is ready, complete, finished or printable while any check is failing, and
 do not describe a failure as a success. If you cannot get a check to pass, say so
 plainly and explain what is wrong.
 
+**Never end a turn by announcing a fix.** "I will correct this in the next
+build" is not a fix — it is a promise, and the turn is over. The user asked for a
+model, not for a plan to make one. If a check fails, rebuild NOW, in this same
+turn, until the check passes or you genuinely cannot. The only acceptable ending
+with a failing check is to say plainly that it still fails and what is wrong --
+never to say you will do it later.
+
 Likewise, a solid count higher than the number of parts you intended means loose
 or duplicated geometry. That is a defect too. Fix it before answering.
 
