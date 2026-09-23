@@ -104,6 +104,7 @@ def run_code(path, log):
 def run_plan(path, log):
     from plan_schema import ModelPlan  # noqa: PLC0415 - subprocess-local import
     from compiler import compile_plan  # noqa: PLC0415
+    from build123d import export_step  # noqa: PLC0415
 
     with open(path, "r", encoding="utf-8") as fh:
         raw = json.load(fh)
@@ -125,8 +126,28 @@ def run_plan(path, log):
                     )
                 print(line)
 
+    # Per-part STEP export: a multi-component design hands back one file per
+    # named functional component, the way Ragnar exports "part by part".
+    parts = {}
+    if plan.parts:
+        os.makedirs("parts", exist_ok=True)
+        with contextlib.redirect_stdout(log):
+            for name, fid in plan.parts.items():
+                if fid not in compiled["shapes"]:
+                    raise RuntimeError(f"parts[{name!r}]={fid!r} does not name a solid feature")
+                out = os.path.join("parts", f"{name}.step")
+                export_step(compiled["shapes"][fid], out)
+                parts[name] = {"path": os.path.abspath(out), "bytes": os.path.getsize(out)}
+                print(f"PART {name}.step from {fid}")
+
     symbols = {k: round(v, 6) for k, v in compiled["symbols"].items()}
-    return compiled["result"], {"checks": checks, "symbols": symbols, "result_id": compiled["result_id"]}, symbols
+    extra = {
+        "checks": checks,
+        "symbols": symbols,
+        "result_id": compiled["result_id"],
+        "parts": parts,
+    }
+    return compiled["result"], extra, symbols
 
 
 def main() -> None:
@@ -158,6 +179,9 @@ def main() -> None:
         payload["extra"] = extra
         payload["stats"] = stats_for(part)
         payload["outputs"] = export_all(part, log)
+        # fold the per-part STEPs into outputs so the service ships them too
+        for name, info in (extra.get("parts") or {}).items():
+            payload["outputs"][f"step:{name}"] = info
         payload["ok"] = True
     except Exception as exc:  # noqa: BLE001 - everything is reported to the caller
         payload["error"] = f"{type(exc).__name__}: {exc}"

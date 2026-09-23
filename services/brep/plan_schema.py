@@ -135,6 +135,29 @@ class Revolve(_Feature):
     axis: Literal["x", "y", "z"] = "z"
 
 
+class Loft(_Feature):
+    """Blend through two or more named profiles. Ragnar names `loft` explicitly
+    as one of its professional operations; this is its counterpart."""
+
+    op: Literal["loft"]
+    profiles: list[str] = Field(min_length=2)
+    ruled: bool = False
+
+
+class ImportStep(_Feature):
+    """Bring existing CAD in as a solid, so it can be cut or unioned against.
+
+    `file` is resolved against the service's import roots and rejected if it
+    escapes them -- a plan is model output, and must not be able to read
+    arbitrary paths.
+    """
+
+    op: Literal["import.step"]
+    file: str
+    at: list[NumberOrExpr] | None = None
+    rotate: list[NumberOrExpr] | None = None
+
+
 class Boolean(_Feature):
     op: Literal["boolean"]
     kind: BoolKind
@@ -217,6 +240,8 @@ Feature = Annotated[
         SketchPolygon,
         Extrude,
         Revolve,
+        Loft,
+        ImportStep,
         Boolean,
         Translate,
         Rotate,
@@ -240,6 +265,10 @@ class ModelPlan(_Strict):
     checks: list[Check] = []
     # Which feature id is the model. Defaults to the last feature.
     result: str | None = None
+    # Per-part export: {export_name: feature_id}. Ragnar exports STEP "whole
+    # model or part by part", so a multi-component design should be able to
+    # hand back one file per named functional component.
+    parts: dict[str, str] | None = None
 
 
 def op_names() -> list[str]:
@@ -250,6 +279,8 @@ def op_names() -> list[str]:
         "sketch.polygon",
         "extrude",
         "revolve",
+        "loft",
+        "import.step",
         "boolean",
         "translate",
         "rotate",

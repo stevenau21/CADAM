@@ -19,6 +19,7 @@ from __future__ import annotations
 import ast
 import math
 import operator
+import os
 from typing import Any
 
 from build123d import (
@@ -35,6 +36,8 @@ from build123d import (
     chamfer,
     extrude,
     fillet,
+    import_step,
+    loft,
     offset,
     revolve,
 )
@@ -42,6 +45,33 @@ from build123d import (
 EPS = 1e-4
 PLANES = {"XY": Plane.XY, "XZ": Plane.XZ, "YZ": Plane.YZ}
 AXES = {"x": Axis.X, "y": Axis.Y, "z": Axis.Z}
+
+# Imported CAD is read from these roots only. A plan is model output; it must
+# not be able to name an arbitrary path on the machine.
+IMPORT_ROOTS = [
+    p
+    for p in os.environ.get(
+        "BREP_IMPORT_ROOTS",
+        os.pathsep.join([os.path.join(os.path.dirname(os.path.abspath(__file__)), "imports"), "F:/projects/3D"]),
+    ).split(os.pathsep)
+    if p.strip()
+]
+
+
+def resolve_import(file: str) -> str:
+    """Resolve an imported CAD path, refusing anything outside the import roots."""
+    roots = [os.path.realpath(r) for r in IMPORT_ROOTS]
+    candidate = file if os.path.isabs(file) else os.path.join(roots[0], file)
+    real = os.path.realpath(candidate)
+    for root in roots:
+        if real == root or real.startswith(root + os.sep):
+            if not os.path.exists(real):
+                raise PlanError(f"import file not found: {file}")
+            return real
+    raise PlanError(
+        f"import file {file!r} is outside the allowed import roots: "
+        + ", ".join(roots)
+    )
 
 
 class PlanError(Exception):
@@ -287,6 +317,32 @@ def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
                 shapes[fid] = revolve(
                     prof, axis=AXES[axis_name], revolution_arc=N("angle", 360.0, required=False)
                 )
+            elif op == "loft":
+                names = feat.get("profiles") or []
+                if len(names) < 2:
+                    raise PlanError(f"{where}: loft needs at least 2 profiles")
+                sections = []
+                for i, nm in enumerate(names):
+                    if nm not in profiles:
+                        raise PlanError(
+                            f"{where}: profiles[{i}]={nm!r} does not name a prior sketch"
+                        )
+                    sections.append(profiles[nm])
+                shapes[fid] = loft(sections, ruled=bool(feat.get("ruled", False)))
+            elif op == "import.step":
+                path = resolve_import(feat["file"])
+                imported = import_step(path)
+                at = feat.get("at")
+                if at is not None:
+                    if len(at) != 3:
+                        raise PlanError(f"{where}: at must be [x, y, z]")
+                    imported = Pos(*[_num(v, env, f"{where}.at[{i}]") for i, v in enumerate(at)]) * imported
+                rot = feat.get("rotate")
+                if rot is not None:
+                    if len(rot) != 3:
+                        raise PlanError(f"{where}: rotate must be [x, y, z] degrees")
+                    imported = Rot(*[_num(v, env, f"{where}.rotate[{i}]") for i, v in enumerate(rot)]) * imported
+                shapes[fid] = imported
             elif op == "boolean":
                 a, b = ref("a", shapes), ref("b", shapes)
                 kind = feat["kind"]

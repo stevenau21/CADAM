@@ -1,27 +1,27 @@
-"""The image-diff loop: render -> compare against the source -> revise the plan.
+"""Vision-diff loop v2: multi-view renders + patch-based revisions.
 
-This is the mechanism that makes text/image -> CAD converge instead of taking a
-first guess on faith. Each pass:
+Two things were wrong with v1, both found by running it:
 
-    1. compile the plan          (POST /plan on the build service)
-    2. render it                 (cadgen stl snapshot)
-    3. show the model the SOURCE (image and/or written brief) plus its OWN RENDER
-       and ask for a concrete difference list
-    4. if there are differences, take the revised plan and go again
+1. It compared ONE render (the closed assembly) against a source image that
+   shows the container OPEN, TRANSPARENT and SECTIONED. The critic could not
+   see the funnel, the dish or the spout -- the very features that matter -- and
+   said so: "the RENDER shows the container with the lid closed, whereas the
+   SOURCE shows it open."  Fixed here by rendering a comparable SET of views:
+   the assembly, a mid-plane SECTION, and each component on its own.
 
-The model sees what it actually built, next to what was asked for -- the same
-feedback a human modeller uses. Stops when the difference list comes back empty
-or the iteration budget runs out.
+2. It asked the model to return the ENTIRE plan (~17 KB, ~4k tokens). Reasoning
+   models spend the whole budget thinking and return nothing at all
+   (finish=length, content=False, 42k chars of reasoning). Fixed here by asking
+   for a DIFF plus a small PATCH, which we apply deterministically ourselves.
 
-    python vision_loop.py --plan tests/container_plan.json \
-        --reference path/to/container.png --iters 3
-
-`--brief "text"` works without an image (the render is still reviewed).
+    python vision_loop.py --plan tests/container_decomposed_plan.json \
+        --reference path/to/container.png --iters 3 --model gemma4:31b
 """
 from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import io
 import json
 import os
@@ -41,14 +41,16 @@ HERE = pathlib.Path(__file__).parent
 CADGEN = "F:/projects/3D/text-to-cad/.venv/Scripts/cadgen.exe"
 
 OP_GUIDE = """
-sketch.rect    {w, h, r=0, plane=XY|XZ|YZ, at=[x,y,z]}      rounded rectangle profile
-sketch.circle  {d, plane, at}                                circle profile
-sketch.polygon {points=[[x,y],...], plane, at}               arbitrary closed profile
-extrude        {profile, height, taper=0}                    profile -> solid
-revolve        {profile, angle=360, axis=x|y|z}              profile about an axis
+sketch.rect    {w, h, r=0, plane=XY|XZ|YZ, at=[x,y,z]}
+sketch.circle  {d, plane, at}
+sketch.polygon {points=[[x,y],...], plane, at}
+extrude        {profile, height, taper=0}
+revolve        {profile, angle=360, axis=x|y|z}
+loft           {profiles=[...], ruled=false}
+import.step    {file, at, rotate}
 boolean        {kind=union|cut|intersect, a, b}
 translate      {target, x, y, z}
-rotate         {target, x, y, z}                             degrees
+rotate         {target, x, y, z}
 fillet         {target, radius, select=all|z_max|z_min|vertical|horizontal|circular}
 chamfer        {target, length, select=...}
 shell          {target, thickness, open=none|z_max|z_min}
@@ -57,35 +59,49 @@ pattern.linear {target, count, spacing, axis}
 pattern.polar  {target, count, axis, angle, center}
 """.strip()
 
-SYSTEM = f"""You are a CAD reviewer. You are given a SOURCE (a reference image and/or a
-written brief) and a RENDER of the model that was actually built from a plan.
+SYSTEM_TEMPLATE = """You are a CAD reviewer. You are shown a SOURCE (a reference image
+and/or a written brief) and several RENDER views of the model built from a plan:
+the assembly, a mid-plane section, and individual components.
 
-Your job is to compare them and report ONLY concrete geometric differences, then
-repair the plan.
+Compare them and report ONLY concrete geometric differences, then describe how to
+fix the PLAN.
 
 Rules:
 - Units are mm. Z is up. The build plate is Z = 0.
-- Numeric fields accept a number or an arithmetic expression string over the
-  plan's symbols, e.g. "body_h - rim_h". Use expressions so derived dimensions
-  stay derived; never repeat a value that is computed from others.
-- Parameters are user-facing sliders; put anything the user would tweak there.
-- Every feature needs a unique "id"; later features refer to earlier ids by name.
-- Reply with ONE json object and nothing else:
-  {{"differences": ["...", "..."],
-    "plan": {{ ...the full corrected plan... }}}}
+- Reply with ONE json object and nothing else, in exactly this shape:
 
-- If the render already matches the source, return an empty "differences" list
-  and repeat the plan unchanged.
-- Be specific in "differences": name the part and the amount
-  (e.g. "the ribs stop at 60mm but should run to 74mm", "the lid handle is 30mm
-  wide but should be about 40mm"). Do not say vague things like "looks different".
-- Keep everything that is already right; change only what is wrong.
+  {"differences": ["specific, geometric, with amounts"],
+   "patch": {
+     "set_parameters": {"rib_pitch": 4.0},
+     "remove_features": ["feature_id"],
+     "set_features": [{"op": "...", "id": "...", "...": "..."}],
+     "append_features": [{"op": "...", "id": "...", "...": "..."}]
+   }}
+
+- Send ONLY what must change. Do NOT restate the whole plan -- the patch is
+  applied to the existing plan for you. Empty lists and an empty object are fine.
+- A parameter is a slider object: name, value, and optional min/max/step/label.
+- Numeric fields accept a number or an arithmetic expression over the plan's
+  symbols, e.g. "body_h - rim_h". Prefer expressions so derived dimensions stay
+  derived -- never repeat a value that is computed from others.
+- Every feature needs a unique id; later features refer to earlier ids by name.
+- The section view shows the interior. Judge interior features (funnel, dish,
+  spout, wall thickness) from it, not from the assembled exterior.
+- If a render looks correct, return an empty differences list and an empty patch.
+- Be specific: name the part and the amount ("the ribs stop at 60mm but should
+  run to 74mm"). Never say vague things like "looks different".
 
 Available operations:
-{OP_GUIDE}
+<<OPS>>
 """
 
+# Built by substitution, not an f-string: the prompt contains literal JSON braces,
+# and f-string brace escaping is a silent trap (it raised "Format specifier
+# missing precision" on the first single-brace line).
+SYSTEM = SYSTEM_TEMPLATE.replace("<<OPS>>", OP_GUIDE)
 
+
+# --------------------------------------------------------------------- util
 def encode_image(path: str, max_side: int = 1024) -> str:
     img = Image.open(path).convert("RGB")
     if max(img.size) > max_side:
@@ -93,7 +109,7 @@ def encode_image(path: str, max_side: int = 1024) -> str:
         img = img.resize((max(1, int(img.width * scale)), max(1, int(img.height * scale))))
     buf = io.BytesIO()
     img.save(buf, "PNG")
-    return base64.b64encode(buf.getvalue()).decode("ascii"), img.size
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def post(path: str, payload: dict, timeout: int = 900) -> dict:
@@ -110,67 +126,117 @@ def post(path: str, payload: dict, timeout: int = 900) -> dict:
         return json.loads(exc.read().decode("utf-8"))
 
 
-def compile_plan(plan: dict) -> dict:
-    return post("/plan", {"plan": plan})
-
-
-def render(stl_path: str, out_png: str) -> bool:
+def render_stl(stl_path: str, out_png: str) -> bool:
     try:
         proc = subprocess.run(
             [CADGEN, "stl", "snapshot", stl_path, out_png],
-            capture_output=True,
-            text=True,
-            timeout=600,
+            capture_output=True, text=True, timeout=600,
         )
-        if proc.returncode != 0:
-            print("   render failed:", proc.stderr.strip()[:200])
-            return False
-        return os.path.exists(out_png)
-    except Exception as exc:  # noqa: BLE001
-        print("   render error:", exc)
+        return proc.returncode == 0 and os.path.exists(out_png)
+    except Exception:
         return False
 
 
-def call_model(api_key: str, model: str, content: list, timeout: int = 900) -> tuple[str, dict]:
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": content},
-        ],
-        # Reasoning models spend tokens on `reasoning` before emitting `content`;
-        # a tight budget leaves content EMPTY while finish_reason is "length".
-        "max_tokens": 32000,
-    }
-    req = urllib.request.Request(
-        OLLAMA,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.load(resp)
-    choice = data["choices"][0]
-    msg = choice["message"]
-    text = msg.get("content") or ""
-    if not text.strip():
-        # Fall back to the reasoning stream rather than failing silently -- it
-        # often contains the JSON when `content` came back empty.
-        text = msg.get("reasoning") or ""
-    meta = {
-        "finish_reason": choice.get("finish_reason"),
-        "usage": data.get("usage"),
-        "had_content": bool((msg.get("content") or "").strip()),
-        "reasoning_chars": len(msg.get("reasoning") or ""),
-    }
-    return text, meta
+# ------------------------------------------------------------------- views
+def section_variant(plan: dict) -> dict | None:
+    """Append a cut that removes everything at y > 0, exposing the interior."""
+    result_id = plan.get("result") or plan["features"][-1]["id"]
+    ids = {f["id"] for f in plan["features"]}
+    for probe in ("__sec_sk", "__sec_solid", "__sec_pos", "__sec"):
+        if probe in ids:
+            return None
+    varied = copy.deepcopy(plan)
+    varied["features"] += [
+        {"op": "sketch.rect", "id": "__sec_sk", "w": 600, "h": 300, "plane": "XY"},
+        {"op": "extrude", "id": "__sec_solid", "profile": "__sec_sk", "height": 600},
+        {"op": "translate", "id": "__sec_pos", "target": "__sec_solid", "y": 150},
+        {"op": "boolean", "id": "__sec", "kind": "cut", "a": result_id, "b": "__sec_pos"},
+    ]
+    varied["result"] = "__sec"
+    varied["checks"] = []
+    varied.pop("parts", None)
+    return varied
+
+
+def build_views(plan: dict, run_dir: pathlib.Path) -> list[tuple[str, str]]:
+    """Render the assembly, a section, and every named component."""
+    views: list[tuple[str, str]] = []
+
+    def shoot(label: str, variant: dict) -> None:
+        res = post("/plan", {"plan": variant})
+        if not res.get("ok"):
+            print(f"    view {label}: FAILED {str(res.get('error'))[:70]}")
+            return
+        stl = (res.get("outputs") or {}).get("stl", {}).get("path")
+        if not stl:
+            return
+        png = str(run_dir / f"view_{label}.png")
+        if render_stl(stl, png):
+            views.append((label, png))
+            print(f"    view {label}: ok  ({res['stats']['solids']} solids)")
+
+    base = copy.deepcopy(plan)
+    base["checks"] = []
+    shoot("assembly", base)
+
+    sec = section_variant(plan)
+    if sec:
+        shoot("section_y0", sec)
+
+    for name, fid in (plan.get("parts") or {}).items():
+        only = copy.deepcopy(plan)
+        only["result"] = fid
+        only["checks"] = []
+        only.pop("parts", None)
+        shoot(f"part_{name}"[:40], only)
+
+    return views
+
+
+# ------------------------------------------------------------------- patch
+def apply_patch(plan: dict, patch: dict) -> tuple[dict, list[str]]:
+    """Apply a small patch deterministically. Returns (new_plan, notes)."""
+    out = copy.deepcopy(plan)
+    notes: list[str] = []
+
+    for name, value in (patch.get("set_parameters") or {}).items():
+        hit = False
+        for p in out.get("parameters", []):
+            if p["name"] == name:
+                p["value"] = value
+                hit = True
+                break
+        notes.append(f"set parameter {name} = {value}" if hit else f"UNKNOWN parameter {name}")
+
+    for fid in patch.get("remove_features") or []:
+        before = len(out["features"])
+        out["features"] = [f for f in out["features"] if f.get("id") != fid]
+        notes.append(f"removed {fid}" if len(out["features"]) < before else f"nothing to remove: {fid}")
+
+    for feat in patch.get("set_features") or []:
+        if not isinstance(feat, dict) or "id" not in feat:
+            notes.append("skipped a set_feature without an id")
+            continue
+        for i, existing in enumerate(out["features"]):
+            if existing.get("id") == feat["id"]:
+                out["features"][i] = feat
+                notes.append(f"replaced feature {feat['id']}")
+                break
+        else:
+            out["features"].append(feat)
+            notes.append(f"appended feature {feat['id']}")
+
+    for feat in patch.get("append_features") or []:
+        if isinstance(feat, dict) and "id" in feat:
+            out["features"].append(feat)
+            notes.append(f"appended feature {feat['id']}")
+
+    return out, notes
 
 
 def extract_json(text: str) -> dict | None:
-    """Models wrap JSON in prose or fences; take the last balanced object."""
     fenced = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
-    candidates = fenced + [text]
-    for blob in candidates:
+    for blob in fenced + [text]:
         start = blob.find("{")
         while start != -1:
             depth, in_str, esc = 0, False, False
@@ -193,7 +259,7 @@ def extract_json(text: str) -> dict | None:
                     if depth == 0:
                         try:
                             obj = json.loads(blob[start : i + 1])
-                            if isinstance(obj, dict) and "plan" in obj:
+                            if isinstance(obj, dict) and "differences" in obj:
                                 return obj
                         except json.JSONDecodeError:
                             pass
@@ -202,114 +268,173 @@ def extract_json(text: str) -> dict | None:
     return None
 
 
+# -------------------------------------------------------------------- model
+def call_model(api_key: str, model: str, content: list, timeout: int = 900) -> tuple[str, dict]:
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM},
+            {"role": "user", "content": content},
+        ],
+        # Small output now, because we ask for a patch rather than the whole plan.
+        "max_tokens": 8000,
+    }
+    req = urllib.request.Request(
+        OLLAMA,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.load(resp)
+    choice = data["choices"][0]
+    msg = choice["message"]
+    text = msg.get("content") or ""
+    had = bool(text.strip())
+    if not had:
+        text = msg.get("reasoning") or ""
+    meta = {
+        "finish": choice.get("finish_reason"),
+        "had_content": had,
+        "reasoning_chars": len(msg.get("reasoning") or ""),
+        "tokens": (data.get("usage") or {}).get("completion_tokens"),
+    }
+    return text, meta
+
+
+# --------------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--plan", required=True)
-    ap.add_argument("--reference", help="reference image path")
-    ap.add_argument("--brief", default="", help="written requirements, used with or without an image")
-    ap.add_argument("--model", default="glm-5.3-flash")
+    ap.add_argument("--reference")
+    ap.add_argument("--brief", default="")
+    ap.add_argument("--model", default="gemma4:31b")
     ap.add_argument("--iters", type=int, default=3)
     ap.add_argument("--out", default="vision_runs")
     ap.add_argument("--api-key", default=os.environ.get("OPENAI_API_KEY", ""))
+    ap.add_argument("--views", default="assembly,section,parts")
     args = ap.parse_args()
 
     if not args.api_key:
         print("no API key: pass --api-key or set OPENAI_API_KEY")
         return 2
 
+    wanted = {v.strip() for v in args.views.split(",") if v.strip()}
     run_dir = pathlib.Path(HERE) / args.out / time.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
 
     plan = json.loads(pathlib.Path(args.plan).read_text(encoding="utf-8"))
     ref_b64 = None
     if args.reference:
-        ref_b64, ref_size = encode_image(args.reference)
-        print("reference %s %sx%s" % (args.reference, ref_size[0], ref_size[1]))
-    print("model     %s   iters %d   run %s\n" % (args.model, args.iters, run_dir.name))
+        ref_b64 = encode_image(args.reference)
+        print("reference %s" % args.reference)
+    print("model     %s   iters %d   views %s   run %s\n"
+          % (args.model, args.iters, sorted(wanted), run_dir.name))
 
-    carry_error = ""
+    applied: list[str] = []
     history = []
+    carry_error = ""
 
     for it in range(1, args.iters + 1):
         print("=" * 70)
         print("ITERATION %d" % it)
         print("=" * 70)
+        (run_dir / f"plan_{it:02d}.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
 
-        result = compile_plan(plan)
-        status = "ok" if result["ok"] else "FAILED: %s" % (result.get("error") or result.get("validation_errors"))
-        print("  compile  %s  (%d ms)" % (status, result["ms"]))
+        if applied:
+            print("  applied  " + "; ".join(applied))
+        applied = []
 
-        (run_dir / ("plan_%02d.json" % it)).write_text(json.dumps(plan, indent=2), encoding="utf-8")
-
-        render_png = None
-        if result["ok"]:
-            stl = (result.get("outputs") or {}).get("stl", {}).get("path")
-            if stl:
-                candidate = str(run_dir / ("render_%02d.png" % it))
-                if render(stl, candidate):
-                    render_png = candidate
-            s = result["stats"]
-            print("  bbox     %.2f x %.2f x %.2f   solids %s   valid %s"
-                  % (s["bbox"][0], s["bbox"][1], s["bbox"][2], s["solids"], s["is_valid"]))
-            for c in result.get("checks") or []:
-                print("  check    %-12s value=%.4f pass=%s" % (c["kind"], c["value"], c.get("pass")))
-        else:
-            carry_error = json.dumps(result.get("validation_errors") or result.get("error"))[:1500]
-            print("  error    %s" % carry_error[:300])
+        print("  building views...")
+        views = build_views(plan, run_dir)
+        if not views:
+            print("  no views rendered -- stopping")
+            break
 
         content: list = []
         text = []
         if args.brief:
             text.append("REQUIREMENTS (the source brief):\n" + args.brief)
-        text.append("CURRENT PLAN:\n" + json.dumps(plan))
+        text.append("CURRENT PLAN (send a patch, do not restate this):\n" + json.dumps(plan))
         if carry_error:
             text.append(
-                "The previous revision FAILED to compile with this error. Fix it:\n" + carry_error
+                "Your PREVIOUS patch was rejected and rolled back. Fix this:\n" + carry_error
             )
         text.append(
-            "Compare the SOURCE against the RENDER and reply with the json object described."
+            "Compare the SOURCE against EVERY render view below and reply with the json "
+            "object described: differences plus a patch."
         )
         content.append({"type": "text", "text": "\n\n".join(text)})
         if ref_b64:
             content.append({"type": "text", "text": "SOURCE image:"})
             content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + ref_b64}})
-        if render_png:
-            b64, _ = encode_image(render_png)
-            content.append({"type": "text", "text": "RENDER of the current plan:"})
-            content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}})
+        for label, png in views:
+            content.append({"type": "text", "text": f"RENDER view: {label}"})
+            content.append({"type": "image_url", "image_url": {"url": "data:image/png;base64," + encode_image(png)}})
 
         try:
             raw, meta = call_model(args.api_key, args.model, content)
-        except Exception as exc:  # noqa: BLE001
-            print("  model call failed: %s" % str(exc)[:300])
+        except Exception as exc:
+            print("  model call failed: %s" % str(exc)[:200])
             break
 
-        print("  model    finish=%s  content=%s  reasoning=%dch  tokens=%s"
-              % (meta["finish_reason"], meta["had_content"], meta["reasoning_chars"],
-                 (meta.get("usage") or {}).get("completion_tokens")))
-        (run_dir / ("model_%02d.txt" % it)).write_text(raw, encoding="utf-8")
+        print("  model    finish=%s content=%s reasoning=%sch tokens=%s"
+              % (meta["finish"], meta["had_content"], meta["reasoning_chars"], meta["tokens"]))
+        (run_dir / f"model_{it:02d}.txt").write_text(raw, encoding="utf-8")
+
         parsed = extract_json(raw)
         if parsed is None:
-            print("  could not parse a plan from the reply (saved to model_%02d.txt)" % it)
+            print("  could not parse a patch from the reply (saved to model_%02d.txt)" % it)
             break
 
         diffs = parsed.get("differences") or []
+        patch = parsed.get("patch") or {}
         print("\n  DIFFERENCES (%d):" % len(diffs))
         for d in diffs:
             print("    - %s" % d)
         history.append({"iteration": it, "differences": diffs})
 
-        if not diffs:
+        if not diffs and not any(patch.values()):
             print("\n  converged: no differences left.")
             break
 
-        plan = parsed["plan"]
+        plan_candidate, notes = apply_patch(plan, patch)
+        applied = notes
+        if not notes:
+            print("\n  patch was empty -- nothing to apply, stopping.")
+            break
+
+        # GATE: a revision must still compile AND keep every fit check passing.
+        # The model may change geometry; it may not silently break the thing the
+        # checks exist to protect. A rejected patch is reverted and its error is
+        # handed back on the next pass.
+        verdict = post("/plan", {"plan": plan_candidate})
+        if not verdict.get("ok"):
+            carry_error = str(verdict.get("error") or verdict.get("validation_errors"))[:400]
+            print("\n  REJECTED -- the patch does not compile: %s" % carry_error)
+            print("  reverted; this error goes back to the model next pass")
+            applied = []
+            continue
+        broken = [c for c in (verdict.get("checks") or []) if c.get("pass") is False]
+        if broken:
+            carry_error = "; ".join(
+                "%s(%s,%s) = %.4f, expected %s"
+                % (c["kind"], c["a"], c["b"], c["value"], c.get("expect"))
+                for c in broken
+            )
+            print("\n  REJECTED -- the patch broke %d fit check(s): %s" % (len(broken), carry_error))
+            print("  reverted; this goes back to the model next pass")
+            applied = []
+            continue
+
+        plan = plan_candidate
         carry_error = ""
-        (run_dir / ("revised_%02d.json" % it)).write_text(json.dumps(plan, indent=2), encoding="utf-8")
-        print("  revised plan saved\n")
+        print("  accepted patch: compiles, %d fit check(s) still pass" % len(verdict.get("checks") or []))
+        (run_dir / f"revised_{it:02d}.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
+        print()
 
     (run_dir / "summary.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
-    print("\nrun dir: %s" % run_dir)
+    print("run dir: %s" % run_dir)
     return 0
 
 

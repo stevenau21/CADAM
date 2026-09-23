@@ -1,0 +1,65 @@
+{
+  "units": "mm",
+  "description": "Import one of Ragnar's own exported STEP parts and modify it: cut a 10mm vent hole, then export the edited part as its own STEP. This is the 'Import STEP -> iterate -> export part by part' loop their site advertises.",
+  "parameters": [
+    {
+      "name": "hole_d",
+      "value": 10,
+      "min": 2,
+      "max": 40,
+      "step": 0.5,
+      "label": "Vent hole diameter"
+    },
+    {
+      "name": "hole_x",
+      "value": 25,
+      "min": -60,
+      "max": 60,
+      "step": 1,
+      "label": "Vent hole X"
+    },
+    {
+      "name": "hole_y",
+      "value": 0,
+      "min": -50,
+      "max": 50,
+      "step": 1,
+      "label": "Vent hole Y"
+    }
+  ],
+  "derived": [],
+  "features": [
+    {
+      "op": "import.step",
+      "id": "ragnar_lid",
+      "file": "F:/projects/3D/Ant Bait/ant_bait_trap.removable_clearance_fit_lid.step"
+    },
+    { "op": "sketch.circle", "id": "vent_sk", "d": "hole_d" },
+    {
+      "op": "extrude",
+      "id": "vent_solid",
+      "profile": "vent_sk",
+      "height": 200
+    },
+    {
+      "op": "translate",
+      "id": "vent_cutter",
+      "target": "vent_solid",
+      "x": "hole_x",
+      "y": "hole_y",
+      "z": -50
+    },
+    {
+      "op": "boolean",
+      "id": "edited_lid",
+      "kind": "cut",
+      "a": "ragnar_lid",
+      "b": "vent_cutter"
+    }
+  ],
+  "checks": [],
+  "parts": {
+    "clearance_fit_lid_v2_with_vent": "edited_lid"
+  },
+  "result": "edited_lid"
+}
