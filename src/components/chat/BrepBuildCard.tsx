@@ -1,11 +1,4 @@
-import {
-  Download,
-  Ruler,
-  TriangleAlert,
-  CircleCheck,
-  Eye,
-  EyeOff,
-} from 'lucide-react';
+import { Download, Ruler, TriangleAlert, CircleCheck } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -87,13 +80,6 @@ export function BrepBuildCard({
   const [visible, setVisible] = useState<Set<string>>(
     () => new Set(parts.length > 1 ? [] : parts.map((p) => p.name)),
   );
-  const toggle = (name: string) =>
-    setVisible((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
 
   return (
     <div className="overflow-hidden rounded-lg border border-adam-neutral-700 bg-adam-bg-secondary-dark">
@@ -112,50 +98,12 @@ export function BrepBuildCard({
       </div>
 
       {parts.length > 0 ? (
-        <div className="space-y-2 p-3 pb-0">
-          <MultiPartViewer parts={parts} visible={visible} />
-          {parts.length > 1 && (
-            <div className="flex flex-wrap gap-1.5">
-              {parts.map((part) => {
-                const on = visible.has(part.name);
-                return (
-                  <button
-                    key={part.name}
-                    type="button"
-                    onClick={() => toggle(part.name)}
-                    aria-pressed={on}
-                    className={cn(
-                      'flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
-                      on
-                        ? 'border-adam-blue/60 bg-adam-blue/15 text-white'
-                        : 'border-gray-600/60 text-gray-400 hover:text-white',
-                    )}
-                    title={on ? `Hide ${part.name}` : `Show ${part.name}`}
-                  >
-                    {on ? (
-                      <Eye className="h-3 w-3" />
-                    ) : (
-                      <EyeOff className="h-3 w-3" />
-                    )}
-                    {part.name}
-                  </button>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() =>
-                  setVisible(
-                    visible.size === parts.length
-                      ? new Set()
-                      : new Set(parts.map((p) => p.name)),
-                  )
-                }
-                className="rounded-full border border-gray-600/60 px-2.5 py-1 text-[11px] text-gray-400 hover:text-white"
-              >
-                {visible.size === parts.length ? 'Hide all' : 'Show all'}
-              </button>
-            </div>
-          )}
+        <div className="p-3 pb-0">
+          <MultiPartViewer
+            parts={parts}
+            visible={visible}
+            onVisibleChange={setVisible}
+          />
         </div>
       ) : (
         output.renderDataUrl && (
