@@ -1,0 +1,712 @@
+{
+  "units": "mm",
+  "description": "DELIBERATELY INCOMPLETE: no funnel, no spout post, no spout hole.",
+  "parameters": [
+    {
+      "name": "body_x",
+      "value": 80,
+      "min": 30,
+      "max": 300,
+      "step": 1,
+      "label": "Body width"
+    },
+    {
+      "name": "body_y",
+      "value": 80,
+      "min": 30,
+      "max": 300,
+      "step": 1,
+      "label": "Body depth"
+    },
+    {
+      "name": "body_h",
+      "value": 74,
+      "min": 20,
+      "max": 300,
+      "step": 1,
+      "label": "Body height"
+    },
+    {
+      "name": "corner_r",
+      "value": 14,
+      "min": 0,
+      "max": 60,
+      "step": 0.5,
+      "label": "Corner radius"
+    },
+    {
+      "name": "wall",
+      "value": 2.6,
+      "min": 1,
+      "max": 8,
+      "step": 0.1,
+      "label": "Wall thickness"
+    },
+    {
+      "name": "floor_t",
+      "value": 2.6,
+      "min": 1,
+      "max": 10,
+      "step": 0.1,
+      "label": "Floor thickness"
+    },
+    {
+      "name": "neck_step",
+      "value": 2.6,
+      "min": 0,
+      "max": 20,
+      "step": 0.1,
+      "label": "Rim step"
+    },
+    {
+      "name": "rim_h",
+      "value": 12,
+      "min": 3,
+      "max": 60,
+      "step": 0.5,
+      "label": "Rim height"
+    },
+    {
+      "name": "rib_out",
+      "value": 1.2,
+      "min": 0.2,
+      "max": 5,
+      "step": 0.1,
+      "label": "Rib projection"
+    },
+    {
+      "name": "rib_h",
+      "value": 2.2,
+      "min": 0.4,
+      "max": 8,
+      "step": 0.1,
+      "label": "Rib height"
+    },
+    {
+      "name": "rib_pitch",
+      "value": 4.6,
+      "min": 1,
+      "max": 20,
+      "step": 0.1,
+      "label": "Rib pitch"
+    },
+    {
+      "name": "rib_count",
+      "value": 11,
+      "min": 0,
+      "max": 40,
+      "step": 1,
+      "label": "Rib count"
+    },
+    {
+      "name": "rib_start_z",
+      "value": 5,
+      "min": 0,
+      "max": 60,
+      "step": 0.5,
+      "label": "First rib height"
+    },
+    {
+      "name": "arch_w",
+      "value": 26,
+      "min": 5,
+      "max": 80,
+      "step": 1,
+      "label": "Arch width"
+    },
+    {
+      "name": "arch_straight",
+      "value": 14,
+      "min": 1,
+      "max": 80,
+      "step": 1,
+      "label": "Arch straight height"
+    },
+    {
+      "name": "arch_bottom_z",
+      "value": 6,
+      "min": 0,
+      "max": 60,
+      "step": 0.5,
+      "label": "Arch bottom height"
+    },
+    {
+      "name": "arch_cx",
+      "value": 24,
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "label": "Arch offset from centre"
+    },
+    {
+      "name": "bowl_r_top",
+      "value": 30,
+      "min": 5,
+      "max": 120,
+      "step": 1,
+      "label": "Funnel top radius"
+    },
+    {
+      "name": "bowl_r_bot",
+      "value": 8,
+      "min": 1,
+      "max": 80,
+      "step": 0.5,
+      "label": "Funnel bottom radius"
+    },
+    {
+      "name": "bowl_z_bot",
+      "value": 8,
+      "min": 1,
+      "max": 80,
+      "step": 0.5,
+      "label": "Funnel bottom height"
+    },
+    {
+      "name": "bowl_z_top",
+      "value": 30,
+      "min": 2,
+      "max": 120,
+      "step": 1,
+      "label": "Funnel top height"
+    },
+    {
+      "name": "bowl_wall",
+      "value": 2.2,
+      "min": 0.6,
+      "max": 8,
+      "step": 0.1,
+      "label": "Funnel wall"
+    },
+    {
+      "name": "post_w",
+      "value": 18,
+      "min": 4,
+      "max": 60,
+      "step": 1,
+      "label": "Spout post width"
+    },
+    {
+      "name": "post_d",
+      "value": 14,
+      "min": 4,
+      "max": 60,
+      "step": 1,
+      "label": "Spout post depth"
+    },
+    {
+      "name": "post_r",
+      "value": 3,
+      "min": 0,
+      "max": 20,
+      "step": 0.5,
+      "label": "Spout post corner radius"
+    },
+    {
+      "name": "spout_hole_d",
+      "value": 7,
+      "min": 1,
+      "max": 30,
+      "step": 0.5,
+      "label": "Spout hole diameter"
+    },
+    {
+      "name": "spout_z",
+      "value": 14,
+      "min": 1,
+      "max": 80,
+      "step": 0.5,
+      "label": "Spout hole height"
+    },
+    {
+      "name": "clearance",
+      "value": 0.4,
+      "min": 0.1,
+      "max": 1.5,
+      "step": 0.05,
+      "label": "Lid clearance per side"
+    },
+    {
+      "name": "lid_wall",
+      "value": 2.6,
+      "min": 1,
+      "max": 8,
+      "step": 0.1,
+      "label": "Lid wall"
+    },
+    {
+      "name": "lid_h",
+      "value": 14,
+      "min": 4,
+      "max": 60,
+      "step": 0.5,
+      "label": "Lid height"
+    },
+    {
+      "name": "lid_cav_h",
+      "value": 10,
+      "min": 2,
+      "max": 60,
+      "step": 0.5,
+      "label": "Lid skirt depth"
+    },
+    {
+      "name": "lid_overlap",
+      "value": 8,
+      "min": 2,
+      "max": 60,
+      "step": 0.5,
+      "label": "Lid overlap on rim"
+    },
+    {
+      "name": "handle_span",
+      "value": 30,
+      "min": 8,
+      "max": 120,
+      "step": 1,
+      "label": "Handle span"
+    },
+    {
+      "name": "handle_t",
+      "value": 5,
+      "min": 1.5,
+      "max": 20,
+      "step": 0.5,
+      "label": "Handle thickness"
+    }
+  ],
+  "derived": [
+    {
+      "name": "neck_x",
+      "expr": "body_x - 2*neck_step"
+    },
+    {
+      "name": "neck_y",
+      "expr": "body_y - 2*neck_step"
+    },
+    {
+      "name": "neck_r",
+      "expr": "corner_r - neck_step"
+    },
+    {
+      "name": "cav_x",
+      "expr": "body_x - 2*wall"
+    },
+    {
+      "name": "cav_y",
+      "expr": "body_y - 2*wall"
+    },
+    {
+      "name": "cav_r",
+      "expr": "corner_r - wall"
+    },
+    {
+      "name": "rib_span_x",
+      "expr": "body_x + 2*rib_out"
+    },
+    {
+      "name": "rib_span_y",
+      "expr": "body_y + 2*rib_out"
+    },
+    {
+      "name": "rib_r",
+      "expr": "corner_r + rib_out"
+    },
+    {
+      "name": "arch_rect_z",
+      "expr": "arch_bottom_z + arch_straight/2"
+    },
+    {
+      "name": "arch_apex_z",
+      "expr": "arch_bottom_z + arch_straight"
+    },
+    {
+      "name": "arch_cut_len",
+      "expr": "body_y + 4"
+    },
+    {
+      "name": "arch_y_center",
+      "expr": "body_y/2 + 2"
+    },
+    {
+      "name": "post_cut_len",
+      "expr": "post_w + 20"
+    },
+    {
+      "name": "lid_in_x",
+      "expr": "neck_x + 2*clearance"
+    },
+    {
+      "name": "lid_in_y",
+      "expr": "neck_y + 2*clearance"
+    },
+    {
+      "name": "lid_in_r",
+      "expr": "neck_r + clearance"
+    },
+    {
+      "name": "lid_x",
+      "expr": "lid_in_x + 2*lid_wall"
+    },
+    {
+      "name": "lid_y",
+      "expr": "lid_in_y + 2*lid_wall"
+    },
+    {
+      "name": "lid_r",
+      "expr": "lid_in_r + lid_wall"
+    },
+    {
+      "name": "lid_z0",
+      "expr": "body_h - lid_overlap"
+    },
+    {
+      "name": "handle_inner_d",
+      "expr": "handle_span - 2*handle_t"
+    },
+    {
+      "name": "handle_cut_w",
+      "expr": "handle_span + 20"
+    },
+    {
+      "name": "handle_cut_half",
+      "expr": "(handle_span + 20)/4"
+    }
+  ],
+  "features": [
+    {
+      "op": "sketch.rect",
+      "id": "sk_body",
+      "w": "body_x",
+      "h": "body_y",
+      "r": "corner_r"
+    },
+    {
+      "op": "extrude",
+      "id": "body_main",
+      "profile": "sk_body",
+      "height": "body_h"
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_step_outer",
+      "w": "body_x + 4",
+      "h": "body_y + 4",
+      "r": "corner_r"
+    },
+    {
+      "op": "extrude",
+      "id": "step_outer",
+      "profile": "sk_step_outer",
+      "height": "rim_h + 2"
+    },
+    {
+      "op": "translate",
+      "id": "step_outer_pos",
+      "target": "step_outer",
+      "z": "body_h - rim_h"
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_neck",
+      "w": "neck_x",
+      "h": "neck_y",
+      "r": "neck_r"
+    },
+    {
+      "op": "extrude",
+      "id": "neck_cut",
+      "profile": "sk_neck",
+      "height": "rim_h + 4"
+    },
+    {
+      "op": "translate",
+      "id": "neck_cut_pos",
+      "target": "neck_cut",
+      "z": "body_h - rim_h - 1"
+    },
+    {
+      "op": "boolean",
+      "id": "rim_ring",
+      "kind": "cut",
+      "a": "step_outer_pos",
+      "b": "neck_cut_pos"
+    },
+    {
+      "op": "boolean",
+      "id": "body_stepped",
+      "kind": "cut",
+      "a": "body_main",
+      "b": "rim_ring"
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_rib",
+      "w": "rib_span_x",
+      "h": "rib_span_y",
+      "r": "rib_r"
+    },
+    {
+      "op": "extrude",
+      "id": "rib_raw",
+      "profile": "sk_rib",
+      "height": "rib_h"
+    },
+    {
+      "op": "translate",
+      "id": "rib_first",
+      "target": "rib_raw",
+      "z": "rib_start_z"
+    },
+    {
+      "op": "pattern.linear",
+      "id": "ribs",
+      "target": "rib_first",
+      "count": "rib_count",
+      "spacing": "rib_pitch",
+      "axis": "z"
+    },
+    {
+      "op": "boolean",
+      "id": "body_ribbed",
+      "kind": "union",
+      "a": "body_stepped",
+      "b": "ribs"
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_cav",
+      "w": "cav_x",
+      "h": "cav_y",
+      "r": "cav_r"
+    },
+    {
+      "op": "extrude",
+      "id": "cav_raw",
+      "profile": "sk_cav",
+      "height": "body_h"
+    },
+    {
+      "op": "translate",
+      "id": "cavity",
+      "target": "cav_raw",
+      "z": "floor_t"
+    },
+    {
+      "op": "boolean",
+      "id": "body_hollow",
+      "kind": "cut",
+      "a": "body_ribbed",
+      "b": "cavity"
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_arch_rect",
+      "w": "arch_w",
+      "h": "arch_straight",
+      "plane": "XZ",
+      "at": [0, 0, "arch_rect_z"]
+    },
+    {
+      "op": "extrude",
+      "id": "arch_rect_raw",
+      "profile": "sk_arch_rect",
+      "height": "arch_cut_len"
+    },
+    {
+      "op": "sketch.circle",
+      "id": "sk_arch_circ",
+      "d": "arch_w",
+      "plane": "XZ",
+      "at": [0, 0, "arch_apex_z"]
+    },
+    {
+      "op": "extrude",
+      "id": "arch_circ_raw",
+      "profile": "sk_arch_circ",
+      "height": "arch_cut_len"
+    },
+    {
+      "op": "boolean",
+      "id": "arch_solid",
+      "kind": "union",
+      "a": "arch_rect_raw",
+      "b": "arch_circ_raw"
+    },
+    {
+      "op": "translate",
+      "id": "arch_placed",
+      "target": "arch_solid",
+      "y": "arch_y_center"
+    },
+    {
+      "op": "pattern.linear",
+      "id": "arches",
+      "target": "arch_placed",
+      "count": 2,
+      "spacing": "-2*arch_cx",
+      "axis": "x"
+    },
+    {
+      "op": "translate",
+      "id": "arches_pos",
+      "target": "arches",
+      "x": "arch_cx"
+    },
+    {
+      "op": "boolean",
+      "id": "body_arched",
+      "kind": "cut",
+      "a": "body_hollow",
+      "b": "arches_pos"
+    },
+    {
+      "op": "translate",
+      "id": "body_final",
+      "target": "body_arched",
+      "z": 0
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_lid",
+      "w": "lid_x",
+      "h": "lid_y",
+      "r": "lid_r"
+    },
+    {
+      "op": "extrude",
+      "id": "lid_raw",
+      "profile": "sk_lid",
+      "height": "lid_h"
+    },
+    {
+      "op": "translate",
+      "id": "lid_solid",
+      "target": "lid_raw",
+      "z": "lid_z0"
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_lid_cav",
+      "w": "lid_in_x",
+      "h": "lid_in_y",
+      "r": "lid_in_r"
+    },
+    {
+      "op": "extrude",
+      "id": "lid_cav_raw",
+      "profile": "sk_lid_cav",
+      "height": "lid_cav_h + 1"
+    },
+    {
+      "op": "translate",
+      "id": "lid_cav",
+      "target": "lid_cav_raw",
+      "z": "lid_z0 - 1"
+    },
+    {
+      "op": "boolean",
+      "id": "lid",
+      "kind": "cut",
+      "a": "lid_solid",
+      "b": "lid_cav"
+    },
+    {
+      "op": "sketch.circle",
+      "id": "sk_hd_outer",
+      "d": "handle_span"
+    },
+    {
+      "op": "extrude",
+      "id": "hd_disc",
+      "profile": "sk_hd_outer",
+      "height": "handle_t"
+    },
+    {
+      "op": "sketch.circle",
+      "id": "sk_hd_inner",
+      "d": "handle_inner_d"
+    },
+    {
+      "op": "extrude",
+      "id": "hd_inner_raw",
+      "profile": "sk_hd_inner",
+      "height": "handle_t + 4"
+    },
+    {
+      "op": "translate",
+      "id": "hd_inner",
+      "target": "hd_inner_raw",
+      "z": -2
+    },
+    {
+      "op": "boolean",
+      "id": "hd_ring",
+      "kind": "cut",
+      "a": "hd_disc",
+      "b": "hd_inner"
+    },
+    {
+      "op": "sketch.rect",
+      "id": "sk_hd_cut",
+      "w": "handle_cut_w",
+      "h": "handle_cut_w/2"
+    },
+    {
+      "op": "extrude",
+      "id": "hd_cut_raw",
+      "profile": "sk_hd_cut",
+      "height": "handle_t + 4"
+    },
+    {
+      "op": "translate",
+      "id": "hd_cut",
+      "target": "hd_cut_raw",
+      "y": "-handle_cut_half",
+      "z": -2
+    },
+    {
+      "op": "boolean",
+      "id": "hd_half",
+      "kind": "cut",
+      "a": "hd_ring",
+      "b": "hd_cut"
+    },
+    {
+      "op": "rotate",
+      "id": "hd_up",
+      "target": "hd_half",
+      "x": 90
+    },
+    {
+      "op": "translate",
+      "id": "hd_pos",
+      "target": "hd_up",
+      "z": "lid_z0 + lid_h"
+    },
+    {
+      "op": "boolean",
+      "id": "lid_final",
+      "kind": "union",
+      "a": "lid",
+      "b": "hd_pos"
+    },
+    {
+      "op": "boolean",
+      "id": "assembly",
+      "kind": "union",
+      "a": "body_final",
+      "b": "lid_final"
+    }
+  ],
+  "checks": [
+    {
+      "kind": "interference",
+      "a": "body_final",
+      "b": "lid_final",
+      "expect": 0,
+      "tolerance": 0.0001
+    }
+  ],
+  "result": "assembly"
+}

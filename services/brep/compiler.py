@@ -27,15 +27,21 @@ from build123d import (
     Cylinder,
     GeomType,
     Plane,
+    Polygon,
     Pos,
+    Rectangle,
     RectangleRounded,
+    Rot,
     chamfer,
     extrude,
     fillet,
     offset,
+    revolve,
 )
 
 EPS = 1e-4
+PLANES = {"XY": Plane.XY, "XZ": Plane.XZ, "YZ": Plane.YZ}
+AXES = {"x": Axis.X, "y": Axis.Y, "z": Axis.Z}
 
 
 class PlanError(Exception):
@@ -110,6 +116,16 @@ def safe_eval(expr: str, names: dict[str, float]) -> float:
     return ev(tree)
 
 
+def _num(value: Any, env: dict[str, float], where: str) -> float:
+    if isinstance(value, bool):
+        raise PlanError(f"{where}: expected a number, got a boolean")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        return safe_eval(value, env)
+    raise PlanError(f"{where}: expected a number or expression string, got {type(value).__name__}")
+
+
 # ---------------------------------------------------------------- selectors
 def _edge_z_span(e) -> float:
     bb = e.bounding_box()
@@ -147,6 +163,76 @@ def select_faces(shape, which: str):
 
 
 # ------------------------------------------------------------------ compile
+def _profile(feat: dict, env: dict[str, float], where: str):
+    """Build a 2D profile: rect, circle or arbitrary polygon, on a chosen plane."""
+    op = feat["op"]
+
+    def N(key: str, default: float = 0.0, required: bool = True) -> float:
+        if key not in feat:
+            if required:
+                raise PlanError(f"{where}: missing field {key!r}")
+            return default
+        return _num(feat[key], env, f"{where}.{key}")
+
+    if op == "sketch.rect":
+        w, h = N("w"), N("h")
+        r = N("r", 0.0, required=False)
+        if w <= 0 or h <= 0:
+            raise PlanError(f"{where}: w and h must be > 0")
+        # RectangleRounded(w, h, 0) raises inside OCCT (a zero-radius fillet),
+        # so sharp corners must take the plain Rectangle path.
+        sketch = Rectangle(w, h) if r <= 0 else RectangleRounded(w, h, r)
+    elif op == "sketch.circle":
+        d = N("d")
+        if d <= 0:
+            raise PlanError(f"{where}: d must be > 0")
+        sketch = Circle(d / 2.0)
+    elif op == "sketch.polygon":
+        raw = feat.get("points") or []
+        if len(raw) < 3:
+            raise PlanError(f"{where}: points needs at least 3 vertices")
+        pts = []
+        for i, pair in enumerate(raw):
+            if len(pair) != 2:
+                raise PlanError(f"{where}: points[{i}] must be [x, y]")
+            pts.append(
+                (
+                    _num(pair[0], env, f"{where}.points[{i}][0]"),
+                    _num(pair[1], env, f"{where}.points[{i}][1]"),
+                )
+            )
+        # align=None keeps the given coordinates absolute instead of recentring,
+        # which matters because profiles are positioned by their own numbers.
+        sketch = Polygon(*pts, align=None)
+    else:
+        raise PlanError(f"{where}: not a sketch op")
+
+    plane_name = feat.get("plane", "XY")
+    if plane_name not in PLANES:
+        raise PlanError(f"{where}: unknown plane {plane_name!r}")
+    sketch = PLANES[plane_name] * sketch
+
+    at = feat.get("at")
+    if at is not None:
+        if len(at) != 3:
+            raise PlanError(f"{where}: at must be [x, y, z]")
+        sketch = Pos(*[_num(v, env, f"{where}.at[{i}]") for i, v in enumerate(at)]) * sketch
+    return sketch
+
+
+def _count(feat: dict, env: dict[str, float], where: str) -> int:
+    """A repeat count: literal or expression, but it must be a whole number."""
+    raw = _num(feat["count"], env, f"{where}.count")
+    rounded = int(round(raw))
+    if abs(raw - rounded) > 1e-6:
+        raise PlanError(f"{where}: count must be a whole number, got {raw}")
+    if rounded < 1:
+        raise PlanError(f"{where}: count must be >= 1, got {rounded}")
+    if rounded > 500:
+        raise PlanError(f"{where}: count {rounded} is unreasonably large")
+    return rounded
+
+
 def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
     """Execute a validated ModelPlan. Returns result shape, stats and checks."""
     env: dict[str, float] = {}
@@ -187,14 +273,20 @@ def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
             return table[name]
 
         try:
-            if op == "sketch.rect":
-                profiles[fid] = RectangleRounded(N("w"), N("h"), N("r", 0, required=False))
-            elif op == "sketch.circle":
-                profiles[fid] = Circle(N("d") / 2.0)
+            if op.startswith("sketch."):
+                profiles[fid] = _profile(feat, env, where)
             elif op == "extrude":
                 prof = ref("profile", profiles)
                 taper = N("taper", 0.0, required=False)
                 shapes[fid] = extrude(prof, amount=N("height"), taper=taper)
+            elif op == "revolve":
+                prof = ref("profile", profiles)
+                axis_name = feat.get("axis", "z")
+                if axis_name not in AXES:
+                    raise PlanError(f"{where}: unknown axis {axis_name!r}")
+                shapes[fid] = revolve(
+                    prof, axis=AXES[axis_name], revolution_arc=N("angle", 360.0, required=False)
+                )
             elif op == "boolean":
                 a, b = ref("a", shapes), ref("b", shapes)
                 kind = feat["kind"]
@@ -207,6 +299,13 @@ def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
             elif op == "translate":
                 t = ref("target", shapes)
                 shapes[fid] = Pos(
+                    N("x", 0.0, required=False),
+                    N("y", 0.0, required=False),
+                    N("z", 0.0, required=False),
+                ) * t
+            elif op == "rotate":
+                t = ref("target", shapes)
+                shapes[fid] = Rot(
                     N("x", 0.0, required=False),
                     N("y", 0.0, required=False),
                     N("z", 0.0, required=False),
@@ -229,18 +328,34 @@ def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     t, amount=-N("thickness"), openings=select_faces(t, feat.get("open", "none"))
                 )
             elif op == "hole":
-                t = ref("target", shapes)
-                shapes[fid] = _cut_holes(t, feat, N, where)
+                shapes[fid] = _cut_holes(ref("target", shapes), feat, env, where)
             elif op == "pattern.linear":
                 t = ref("target", shapes)
-                count = int(feat["count"])
                 spacing = N("spacing")
                 axis = feat.get("axis", "x")
                 acc = t
-                for i in range(1, count):
+                for i in range(1, _count(feat, env, where)):
                     d = [0.0, 0.0, 0.0]
                     d[{"x": 0, "y": 1, "z": 2}[axis]] = i * spacing
                     acc = acc + Pos(*d) * t
+                shapes[fid] = acc
+            elif op == "pattern.polar":
+                t = ref("target", shapes)
+                axis = feat.get("axis", "z")
+                count = _count(feat, env, where)
+                total = N("angle", 360.0, required=False)
+                center = feat.get("center")
+                cx, cy = (0.0, 0.0)
+                if center is not None:
+                    if len(center) != 2:
+                        raise PlanError(f"{where}: center must be [x, y]")
+                    cx = _num(center[0], env, f"{where}.center[0]")
+                    cy = _num(center[1], env, f"{where}.center[1]")
+                acc = t
+                for i in range(1, count):
+                    a = total / count * i
+                    rot = {"x": Rot(a, 0, 0), "y": Rot(0, a, 0), "z": Rot(0, 0, a)}[axis]
+                    acc = acc + Pos(cx, cy, 0) * rot * Pos(-cx, -cy, 0) * t
                 shapes[fid] = acc
             else:
                 raise PlanError(f"{where}: unknown op")
@@ -261,8 +376,7 @@ def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
         if chk["kind"] == "gap":
             value = _gap(shapes[a], shapes[b])
         else:
-            inter = shapes[a].intersect(shapes[b])
-            value = float(inter.volume) if inter is not None else 0.0
+            value = _interference_volume(shapes[a], shapes[b])
         entry = {"kind": chk["kind"], "a": a, "b": b, "value": value}
         if chk.get("expect") is not None:
             expect = _num(chk["expect"], env, f"check {chk['kind']}.expect")
@@ -281,14 +395,31 @@ def compile_plan(plan: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _num(value: Any, env: dict[str, float], where: str) -> float:
-    if isinstance(value, bool):
-        raise PlanError(f"{where}: expected a number, got a boolean")
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        return safe_eval(value, env)
-    raise PlanError(f"{where}: expected a number or expression string, got {type(value).__name__}")
+def _interference_volume(a, b) -> float:
+    """Volume of the boolean intersection. 0 means the parts do not collide.
+
+    `intersect` can return None (no overlap), a single Shape, or a ShapeList
+    when either operand is a multi-solid compound -- so the volume has to be
+    summed over whatever comes back, not read off a single attribute.
+    """
+    inter = a.intersect(b)
+    if inter is None:
+        return 0.0
+    if hasattr(inter, "volume"):
+        try:
+            return float(inter.volume)
+        except Exception:  # noqa: BLE001 - fall through to summing
+            pass
+    total = 0.0
+    try:
+        for piece in inter:
+            try:
+                total += float(piece.volume)
+            except Exception:  # noqa: BLE001 - skip unmeasurable pieces
+                pass
+    except TypeError:
+        pass
+    return total
 
 
 def _gap(a, b) -> float:
@@ -302,8 +433,8 @@ def _gap(a, b) -> float:
     raise PlanError("could not measure the gap between the two shapes")
 
 
-def _cut_holes(shape, feat, N, where: str):
-    radius = N("d") / 2.0
+def _cut_holes(shape, feat, env, where: str):
+    radius = _num(feat["d"], env, f"{where}.d") / 2.0
     if radius <= 0:
         raise PlanError(f"{where}: d must be > 0")
     positions = feat.get("positions") or []
@@ -315,19 +446,19 @@ def _cut_holes(shape, feat, N, where: str):
         start = bb.min.Z - 1.0
         height = (bb.max.Z - bb.min.Z) + 2.0
     else:
-        depth = N("depth")
+        depth = _num(feat["depth"], env, f"{where}.depth")
         if depth <= 0:
             raise PlanError(f"{where}: non-through holes need depth > 0")
-        top = N("z", bb.max.Z, required=False) if feat.get("z") is not None else bb.max.Z
+        top = _num(feat["z"], env, f"{where}.z") if feat.get("z") is not None else bb.max.Z
         start = top - depth
         height = depth + 1.0
 
     cutter = None
-    for pair in positions:
+    for i, pair in enumerate(positions):
         if len(pair) != 2:
-            raise PlanError(f"{where}: each position must be [x, y]")
-        x = _num(pair[0], {}, f"{where}.positions")
-        y = _num(pair[1], {}, f"{where}.positions")
+            raise PlanError(f"{where}: positions[{i}] must be [x, y]")
+        x = _num(pair[0], env, f"{where}.positions[{i}][0]")
+        y = _num(pair[1], env, f"{where}.positions[{i}][1]")
         c = Pos(x, y, start + height / 2.0) * Cylinder(radius=radius, height=height)
         cutter = c if cutter is None else cutter + c
     return shape - cutter

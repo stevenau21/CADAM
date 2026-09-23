@@ -35,7 +35,6 @@ def _reject_bool(value):
 
 
 StrictNumber = Annotated[float, BeforeValidator(_reject_bool)]
-StrictCount = Annotated[int, BeforeValidator(_reject_bool), Field(ge=1, le=200)]
 
 # A number, or a string expression evaluated against the plan's symbols.
 NumberOrExpr = Union[StrictNumber, str]
@@ -89,16 +88,34 @@ class _Feature(_Strict):
     id: str
 
 
-class SketchRect(_Feature):
+class _Sketch(_Feature):
+    """A 2D profile. `plane` picks which plane it is drawn on, `at` offsets it
+    afterwards -- both needed for solids of revolution, whose profile must sit
+    in a plane containing the axis."""
+
+    plane: Literal["XY", "XZ", "YZ"] = "XY"
+    at: list[NumberOrExpr] | None = None
+
+
+class SketchRect(_Sketch):
     op: Literal["sketch.rect"]
     w: NumberOrExpr
     h: NumberOrExpr
     r: NumberOrExpr = 0
 
 
-class SketchCircle(_Feature):
+class SketchCircle(_Sketch):
     op: Literal["sketch.circle"]
     d: NumberOrExpr
+
+
+class SketchPolygon(_Sketch):
+    """Arbitrary closed profile from points, in the sketch plane's own 2D
+    coordinates. This is the op that unlocks bowls, funnels, wedges and arches
+    -- anything whose cross-section is not a rectangle or a circle."""
+
+    op: Literal["sketch.polygon"]
+    points: list[list[NumberOrExpr]]
 
 
 class Extrude(_Feature):
@@ -106,6 +123,16 @@ class Extrude(_Feature):
     profile: str
     height: NumberOrExpr
     taper: NumberOrExpr = 0
+
+
+class Revolve(_Feature):
+    """Revolve a profile about X, Y or Z. The profile must lie in a plane that
+    contains the axis (e.g. an XZ-plane profile revolved about Z)."""
+
+    op: Literal["revolve"]
+    profile: str
+    angle: NumberOrExpr = 360
+    axis: Literal["x", "y", "z"] = "z"
 
 
 class Boolean(_Feature):
@@ -117,6 +144,14 @@ class Boolean(_Feature):
 
 class Translate(_Feature):
     op: Literal["translate"]
+    target: str
+    x: NumberOrExpr = 0
+    y: NumberOrExpr = 0
+    z: NumberOrExpr = 0
+
+
+class Rotate(_Feature):
+    op: Literal["rotate"]
     target: str
     x: NumberOrExpr = 0
     y: NumberOrExpr = 0
@@ -157,23 +192,40 @@ class Hole(_Feature):
 class PatternLinear(_Feature):
     op: Literal["pattern.linear"]
     target: str
-    count: StrictCount
+    # A count may be a literal or an expression, so the number of ribs can be a
+    # slider like any other dimension. The compiler requires a whole number.
+    count: NumberOrExpr
     spacing: NumberOrExpr
     axis: Literal["x", "y", "z"] = "x"
+
+
+class PatternPolar(_Feature):
+    """Copy a shape N times around an axis -- ribs, spokes, bolt circles."""
+
+    op: Literal["pattern.polar"]
+    target: str
+    count: NumberOrExpr
+    axis: Literal["x", "y", "z"] = "z"
+    angle: NumberOrExpr = 360
+    center: list[NumberOrExpr] | None = None
 
 
 Feature = Annotated[
     Union[
         SketchRect,
         SketchCircle,
+        SketchPolygon,
         Extrude,
+        Revolve,
         Boolean,
         Translate,
+        Rotate,
         Fillet,
         Chamfer,
         Shell,
         Hole,
         PatternLinear,
+        PatternPolar,
     ],
     Field(discriminator="op"),
 ]
@@ -195,12 +247,16 @@ def op_names() -> list[str]:
     return [
         "sketch.rect",
         "sketch.circle",
+        "sketch.polygon",
         "extrude",
+        "revolve",
         "boolean",
         "translate",
+        "rotate",
         "fillet",
         "chamfer",
         "shell",
         "hole",
         "pattern.linear",
+        "pattern.polar",
     ]

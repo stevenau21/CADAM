@@ -4,3 +4,6 @@ artifacts/
 __pycache__/
 *.pyc
 .venv/
+
+# vision-loop run artifacts (plans, renders, model replies)
+tests/vision_runs/
