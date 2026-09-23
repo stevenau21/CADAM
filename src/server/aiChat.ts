@@ -1449,6 +1449,37 @@ plainly and explain what is wrong.
 Likewise, a solid count higher than the number of parts you intended means loose
 or duplicated geometry. That is a defect too. Fix it before answering.
 
+# Build in stages, not in one shot
+
+A large plan is where models fail. One wrong derived value propagates into every
+feature that depends on it, and one bad boolean can silently delete most of the
+model. A twenty-feature plan that was produced in a single jump reads as
+plausible and comes out wrong.
+
+So grow the model in stages, and finish a stage before starting the next. Each
+call should add ONE coherent group of features:
+
+  STAGE 1  the primary solids — sketches, extrudes, booleans. Nothing else.
+  STAGE 2  secondary features — holes, patterns, shells, fillets, chamfers.
+  STAGE 3  the other parts, each built and confirmed on its own.
+  STAGE 4  assembly and joints — position the parts, declare the checks.
+
+Rules that make this work:
+
+- Do NOT add fillets, chamfers or patterns until the base solid compiles AND its
+  bounding box is what you intended. A fillet on wrong geometry turns one error
+  into many, and fillets are the most frequent cause of a failed rebuild.
+- Before adding detail, check the SIZE. If the bounding box is wrong, everything
+  built on top of it is wrong, and detail only makes that harder to see.
+- For a multi-part model, set result to one part and confirm THAT PART alone
+  (bbox, solids, render) before assembling. Never debug three parts at once.
+- When a build fails, do not add features to fix it. REMOVE the group you last
+  added, get back to something that compiles and measures correctly, then
+  re-add it correctly.
+- A smaller model that is right beats a complete model that fails. If you are
+  running out of room, deliver the verified stages and say what is still
+  missing, rather than assembling something unverified.
+
 # Operations
 
 sketch.rect    {w, h, r=0, plane=XY|XZ|YZ, at=[x,y,z]}          rounded rectangle profile
