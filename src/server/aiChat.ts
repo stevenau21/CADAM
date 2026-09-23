@@ -7,6 +7,7 @@ import { cleanAssistantText, getParametricText } from '@shared/parametricParts';
 import { imageIdFromFilename, imageStoragePath } from '@shared/imageRefs';
 import { normalizeConversationSuggestions } from '@shared/suggestions';
 import { normalizeModelId } from '@shared/models';
+import { modelSeesImages } from '@shared/models';
 import type { Conversation, Message, MeshFileType, Model } from '@shared/types';
 import {
   convertToModelMessages,
@@ -26,6 +27,7 @@ import type { ProviderOptions } from '@ai-sdk/provider-utils';
 import imageType from 'image-type';
 import { z } from 'zod';
 import { billing, BillingClientError } from './billingClient';
+import { buildPlan } from './brepService';
 import { corsHeaders, isRecord } from './api';
 import { env, requiredEnv } from './env';
 import { logError } from './serverLog';
@@ -384,8 +386,28 @@ type ChatBody = {
 
 type ConversationAccess = Pick<
   Conversation,
-  'id' | 'type' | 'user_id' | 'current_message_leaf_id'
+  'id' | 'type' | 'user_id' | 'current_message_leaf_id' | 'settings'
 >;
+
+/**
+ * Whether this conversation runs on the B-Rep engine.
+ *
+ * Deliberately read from the existing `settings` jsonb rather than adding a
+ * value to the `conversation-type` enum: the enum lives in a migration, and a
+ * settings flag lets the engine be switched per conversation with no schema
+ * change and no risk to existing rows.
+ */
+function usesBrepEngine(conversation: ConversationAccess): boolean {
+  if (conversation.type !== 'parametric') return false;
+  // `settings` is typed for the fields the OpenSCAD path uses (model,
+  // suggestions). `engine` is additive, so read it through a loose view rather
+  // than widening the shared type and rippling through every consumer.
+  const settings = conversation.settings as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  return Boolean(settings) && settings?.engine === 'brep';
+}
 
 function isChatBody(value: unknown): value is ChatBody {
   return (
@@ -1034,6 +1056,126 @@ async function downloadAsBase64(
   return { base64: btoa(binary), mediaType };
 }
 
+/**
+ * B-Rep tools. Unlike the OpenSCAD path, this one EXECUTES ON THE SERVER.
+ *
+ * OpenCascade has no practical browser build, so there is nothing for the client
+ * to do here: the plan goes to the local B-Rep service, comes back as exact
+ * geometry plus a render, and `toModelOutput` hands that render straight back to
+ * the model. The browser never has to know how the geometry was made, and the
+ * vision loop needs no round trip through client state.
+ */
+function brepTools({ model }: { model: Model }) {
+  // The render is attached to the tool result so the model can look at its own
+  // geometry. A model that cannot accept images would fail the whole request,
+  // so check first and fall back to a numbers-only loop.
+  const canSee = modelSeesImages(model);
+  return {
+    build_brep_model: {
+      ...chatTools.build_brep_model,
+      async execute({ plan }: AppTools['build_brep_model']['input']) {
+        const result = await buildPlan(plan);
+        const failed = (result.checks ?? []).filter((c) => c.pass === false);
+
+        const status: 'success' | 'error' | 'invalid' = result.ok
+          ? failed.length
+            ? 'error'
+            : 'success'
+          : result.validationErrors?.length
+            ? 'invalid'
+            : 'error';
+
+        const bits: string[] = [];
+        if (result.validationErrors?.length) {
+          bits.push(
+            'Plan rejected by the schema (fix these exact fields): ' +
+              result.validationErrors
+                .map((e) => `${e.path}: ${e.msg}`)
+                .join('; '),
+          );
+        }
+        if (result.error) bits.push(result.error);
+        if (result.traceback) {
+          bits.push(result.traceback.split('\n').slice(-8).join('\n'));
+        }
+        if (result.stats) {
+          const s = result.stats;
+          bits.push(
+            `bbox ${s.bbox.map((v) => v.toFixed(2)).join(' x ')} mm; ` +
+              `solids ${s.solids}; faces ${s.faces}; ` +
+              `volume ${s.volume == null ? 'unknown' : s.volume.toFixed(1)} mm3; ` +
+              `valid ${s.is_valid}`,
+          );
+        }
+        for (const c of result.checks ?? []) {
+          bits.push(
+            `${c.kind}(${c.a}, ${c.b}) = ${c.value.toFixed(4)}` +
+              (c.expect === undefined
+                ? ''
+                : ` expected ${c.expect} -> ${c.pass ? 'PASS' : 'FAIL'}`),
+          );
+        }
+        if (failed.length) {
+          bits.push(
+            `${failed.length} declared fit check(s) FAILED. Change the geometry so they pass.`,
+          );
+        }
+
+        const partNames = Object.keys(result.files ?? {})
+          .filter((k) => k.startsWith('step:'))
+          .map((k) => k.slice('step:'.length));
+
+        return {
+          status,
+          message: bits.join('\n') || 'Compiled.',
+          stats: result.stats ?? undefined,
+          checks: result.checks ?? undefined,
+          stepBase64: result.files?.step,
+          stlBase64: result.files?.stl,
+          renderDataUrl: result.files?.render
+            ? `data:image/png;base64,${result.files.render}`
+            : undefined,
+          partNames: partNames.length ? partNames : undefined,
+        };
+      },
+      async toModelOutput({
+        output,
+      }: {
+        output: AppTools['build_brep_model']['output'];
+      }) {
+        const text = [
+          output.message,
+          output.partNames?.length
+            ? `Named parts exported separately: ${output.partNames.join(', ')}.`
+            : '',
+          output.renderDataUrl && canSee
+            ? 'A render of the compiled model is attached — inspect it against the user request from every visible angle.'
+            : 'No render was attached; judge only from the numbers above.',
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        if (output.renderDataUrl && canSee) {
+          const base64 = output.renderDataUrl.split(',')[1] ?? '';
+          return {
+            type: 'content' as const,
+            value: [
+              { type: 'text' as const, text },
+              {
+                type: 'image-data' as const,
+                data: base64,
+                mediaType: 'image/png',
+              },
+            ],
+          };
+        }
+        return { type: 'text' as const, value: text };
+      },
+    },
+    answer_user: chatTools.answer_user,
+  };
+}
+
 function parametricTools({
   previewPathForToolCall,
   supabaseClient,
@@ -1087,6 +1229,113 @@ function parametricTools({
   };
 }
 
+const BREP_AGENT_PROMPT = `You are Adam, an agentic AI CAD engineer. You build EXACT B-Rep models by
+emitting a ModelPlan — a list of typed operations with numeric parameters — which
+a real geometry kernel executes. The user sees a live render while you work.
+
+Use build_brep_model whenever the user asks for a CAD model, an edit to one, or a
+fix to a plan. Never say you created, designed, generated, updated or fixed a
+model unless you called build_brep_model in that turn. Use answer_user for the
+final user-facing text and for ordinary conversation.
+
+CRITICAL: the plan is the ARGUMENT to build_brep_model — it is never reply text.
+If you catch yourself typing plan JSON as prose (a reply that starts with
+{"units": ...), stop: nothing is built, the user sees nothing, and the turn is
+wasted. The JSON belongs inside the tool call. A short sentence of intent before
+the call is fine; the plan itself must be the call.
+
+# How to work
+
+1. Emit a complete plan. It is a full description of the model, not a diff.
+2. The service compiles it and returns the bounding box, solid count, volume, a
+   render, and the result of every fit check you declared.
+3. INSPECT THE RENDER against the request from every visible angle. If anything is
+   missing, wrong, too simple, disconnected, hidden or unclear, emit a corrected
+   complete plan. Loop until it is right, then call answer_user.
+4. Do not finalise just because it compiled. Finalise because the render is right.
+
+# ModelPlan shape
+
+{
+  "units": "mm",
+  "description": "one line",
+  "parameters": [ {"name": "body_h", "value": 74, "min": 20, "max": 300, "step": 1, "label": "Body height"} ],
+  "derived":    [ {"name": "rim_wall", "expr": "wall - neck_step"} ],
+  "features":   [ {"op": "...", "id": "...", ...} ],
+  "checks":     [ {"kind": "interference", "a": "body", "b": "lid", "expect": 0, "tolerance": 0.001} ],
+  "parts":      { "ribbed_base_with_funnel_dish": "base" },
+  "result": "assembly"
+}
+
+# Rules
+
+- Units are mm. Z is up. The build plate is Z = 0. Geometry sits above it.
+- AXES: X = width (left-right), Y = depth (front-back), Z = height. A tunnel
+  running "front to back" runs along Y. Never guess at orientation — state the axis.
+- Numeric fields accept a number OR an arithmetic expression over the plan's
+  symbols, e.g. "body_h - rim_h".
+- DERIVE, DO NOT DUPLICATE. Every mating dimension must come from a shared
+  parameter plus a clearance. If the lid's inner size appears as a typed number
+  instead of an expression over the body's size, the fit is a coincidence rather
+  than a guarantee. Put factorable maths in "derived".
+- Every feature needs a unique "id". Later features refer to earlier ids by name.
+- Parameters are user-facing sliders. Expose anything the user would sensibly tweak.
+- Wall thickness: at least 2-3 extrusion widths. Prefer 2.0 mm or more.
+- A rim/skirt wall is (wall - step). Make sure it is positive, or the cavity will
+  eat the rim entirely.
+
+# Multi-part models
+
+When the model has more than one printed part (a body and a lid, a base and a
+cover, a housing plus an insert), decompose it:
+
+- Name each component by FUNCTION, not by shape: ribbed_base_with_funnel_dish,
+  clearance_fit_spout_insert, clearance_fit_lid_with_handle.
+- State the joint for each pair. "clearance_fit", "snap_on", "slide_in",
+  "threaded", "press_fit".
+- Declare checks for every joint. interference(...) must be 0 for all pairs;
+  gap(a, b) should equal the clearance you designed. These are verified and a
+  failed check comes back to you as an error.
+- List the parts map so each component is exported as its own STEP file.
+- The result should be the assembly.
+
+# Operations
+
+sketch.rect    {w, h, r=0, plane=XY|XZ|YZ, at=[x,y,z]}          rounded rectangle profile
+sketch.circle  {d, plane, at}                                   circle profile
+sketch.polygon {points=[[x,y],...], plane, at}                  arbitrary closed profile
+                (closed, 3+ points, in the plane's own 2D coordinates)
+extrude        {profile, height, taper=0}                       profile -> solid along its normal
+revolve        {profile, angle=360, axis=x|y|z}                 profile about an axis
+                (the profile must lie in a plane containing the axis)
+loft           {profiles=[id, id, ...], ruled=false}            blend through 2+ profiles
+boolean        {kind=union|cut|intersect, a, b}
+translate      {target, x, y, z}
+rotate         {target, x, y, z}                                degrees
+fillet         {target, radius, select=all|z_max|z_min|vertical|horizontal|circular}
+chamfer        {target, length, select=...}
+shell          {target, thickness, open=none|z_max|z_min}
+hole           {target, d, positions=[[x,y],...], through=true, depth, z}
+pattern.linear {target, count, spacing, axis=x|y|z}
+pattern.polar  {target, count, axis, angle=360, center=[x,y]}
+
+A profile is produced by a sketch.* op and consumed by extrude/revolve/loft.
+A solid is produced by any other op and consumed by booleans, fillets,
+transforms, patterns, holes, shells.
+
+# Building blocks worth remembering
+
+- A cylinder is sketch.circle + extrude. A torus/ring is sketch.circle on XZ,
+offset from the axis, + revolve about Z.
+- An arched opening is a rectangle unioned with a circle of the same width whose
+centre sits at the rectangle's top, then cut. Keep the straight sides at least
+half the width tall, or the circle will cut below the opening.
+- An arch HANDLE is a flat annulus: circle, minus a smaller circle, minus a box
+covering the lower half, then rotate 90 about X to stand it up.
+- A mid-plane section view is a boolean cut by a large box over one half.
+
+After a successful build, speak in the past tense and keep answer_user short.`;
+
 function chatModel(conversation: ConversationAccess, model: Model) {
   if (conversation.type === 'creative') {
     return 'anthropic/claude-sonnet-4.5';
@@ -1095,8 +1344,9 @@ function chatModel(conversation: ConversationAccess, model: Model) {
 }
 
 function systemPrompt(conversation: ConversationAccess) {
-  return conversation.type === 'creative'
-    ? CREATIVE_AGENT_PROMPT
+  if (conversation.type === 'creative') return CREATIVE_AGENT_PROMPT;
+  return usesBrepEngine(conversation)
+    ? BREP_AGENT_PROMPT
     : PARAMETRIC_AGENT_PROMPT;
 }
 
@@ -1129,7 +1379,7 @@ export async function handleAiChatRequest(req: Request) {
 
   const { data: conversation, error: conversationError } = await supabaseClient
     .from('conversations')
-    .select('id, type, user_id, current_message_leaf_id')
+    .select('id, type, user_id, current_message_leaf_id, settings')
     .eq('id', rawBody.conversationId)
     .eq('user_id', user.id)
     .single()
@@ -1178,11 +1428,13 @@ export async function handleAiChatRequest(req: Request) {
   const tools =
     conversation.type === 'creative'
       ? creativeTools({ conversation, req, model: rawBody.model })
-      : parametricTools({
-          supabaseClient,
-          previewPathForToolCall: (toolCallId) =>
-            `${user.id}/${conversation.id}/inspection-preview-${toolCallId}`,
-        });
+      : usesBrepEngine(conversation)
+        ? brepTools({ model: chatModel(conversation, rawBody.model) })
+        : parametricTools({
+            supabaseClient,
+            previewPathForToolCall: (toolCallId) =>
+              `${user.id}/${conversation.id}/inspection-preview-${toolCallId}`,
+          });
 
   let branchMessages: AppUIMessage[];
   let leafRole: 'user' | 'assistant';
@@ -1376,6 +1628,14 @@ export async function handleAiChatRequest(req: Request) {
     leafRole === 'user' &&
     !forceBuildToolChoice;
 
+  // Which build tool this conversation uses. CADAM pins the toolset to the build
+  // tool on step 0, so this name has to match the engine — a B-Rep conversation
+  // still has type 'parametric', and hardcoding the OpenSCAD name here left
+  // build_brep_model unexposed: the model would say "building it now" and stop.
+  const buildToolName = usesBrepEngine(conversation)
+    ? 'build_brep_model'
+    : 'build_parametric_model';
+
   const result = streamText({
     model: chatLanguageModel,
     providerOptions: chatProviderOptions,
@@ -1391,18 +1651,18 @@ export async function handleAiChatRequest(req: Request) {
         // Restrict the toolset to the build tool on the first step. Models that
         // accept a forced tool_choice get it pinned; the reasoning-tier Claude 5
         // models (Fable/Mythos) reject forced tool use and fall back to auto,
-        // relying on the system prompt to call build_parametric_model.
+        // relying on the system prompt to call the build tool.
         // When pinning the tool on a thinking-enabled Anthropic model, thinking
         // must be off for this step (Anthropic rejects forced tool use while
         // thinking is on) — disable it here only; later steps keep the adaptive
         // thinking configured in buildChatModel.
         return {
-          activeTools: ['build_parametric_model' as never],
+          activeTools: [buildToolName as never],
           ...(forceBuildToolChoice
             ? {
                 toolChoice: {
                   type: 'tool' as const,
-                  toolName: 'build_parametric_model' as never,
+                  toolName: buildToolName as never,
                 },
                 ...(disableThinkingForBuildStep
                   ? {

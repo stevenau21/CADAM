@@ -39,6 +39,81 @@ export const answerUserSchema = z.object({
   message: z.string().min(1),
 });
 
+/**
+ * B-Rep artefacts. The `plan` is deliberately a loose record: the authoritative
+ * schema is pydantic's ModelPlan inside services/brep, and duplicating ~15 ops
+ * in zod here would guarantee the two drift apart. The model learns the
+ * vocabulary from the system prompt; the service is what rejects a bad plan, and
+ * it rejects it with an exact field path.
+ */
+export const brepPlanInputSchema = z.object({
+  title: z.string().min(1).describe('Short name for the artefact'),
+  version: z.string().default('v1'),
+  summary: z
+    .string()
+    .optional()
+    .describe('One line describing what changed in this revision'),
+  /**
+   * The plan's TOP LEVEL is described so the model has a shape to fill in, but
+   * the entries stay loose: pydantic's ModelPlan inside services/brep is the
+   * authority for operations, and duplicating ~15 ops here would guarantee the
+   * two drift apart.
+   *
+   * The top level is NOT optional detail. A schema of
+   * `{plan: {type: object, additionalProperties: {}}}` has no described fields
+   * at all, and models respond by writing the plan as prose instead of calling
+   * the tool -- measured: gemma4:31b returned empty text with the loose schema
+   * and called the tool correctly with a shaped one.
+   */
+  plan: z
+    .object({
+      units: z.literal('mm').optional(),
+      description: z.string().optional(),
+      parameters: z
+        .array(z.record(z.unknown()))
+        .optional()
+        .describe('User-facing sliders: name, value, min, max, step, label'),
+      derived: z
+        .array(z.record(z.unknown()))
+        .optional()
+        .describe('Computed symbols: {name, expr} over the parameters'),
+      features: z
+        .array(z.record(z.unknown()))
+        .describe(
+          'The operations in order. Each is {op, id, ...fields}. The operation ' +
+            'vocabulary is in the system prompt.',
+        ),
+      checks: z
+        .array(z.record(z.unknown()))
+        .optional()
+        .describe('Declared fit checks: {kind, a, b, expect, tolerance}'),
+      parts: z
+        .record(z.string())
+        .optional()
+        .describe('Component export map: {part_name: feature_id}'),
+      result: z.string().optional().describe('Feature id of the final model'),
+    })
+    .describe('A ModelPlan: parameters, derived symbols, features, fit checks'),
+});
+
+export const brepCompileOutputSchema = z.object({
+  status: z.enum(['success', 'error', 'invalid']),
+  message: z.string(),
+  stats: z.record(z.unknown()).optional(),
+  checks: z.array(z.record(z.unknown())).optional(),
+  /** STEP for the whole model, base64 — the format CADAM has never had. */
+  stepBase64: z.string().optional(),
+  stlBase64: z.string().optional(),
+  /** data: URL of the render, so the model can be shown its own geometry. */
+  renderDataUrl: z.string().optional(),
+  partNames: z.array(z.string()).optional(),
+});
+
+/** Model IDs that can accept image input. `supportsVision` in lib/utils is the
+ * UI's source of truth; this is the server's guard for the image path, because
+ * some models in the picker reject images outright (glm-5.3 among them). */
+export const brepPlanToolName = 'build_brep_model' as const;
+
 export const chatTools = {
   build_parametric_model: tool({
     description:
@@ -57,6 +132,16 @@ export const chatTools = {
       'Create a 3D mesh from text, images, or an existing mesh plus edit instructions.',
     inputSchema: createMeshInputSchema,
     outputSchema: createMeshOutputSchema,
+  }),
+  build_brep_model: tool({
+    description:
+      'Create or update an EXACT B-Rep CAD model by emitting a ModelPlan — a list of ' +
+      'typed operations (sketches, extrude, revolve, loft, boolean, fillet, chamfer, ' +
+      'shell, hole, patterns) with numeric parameters. Unlike build_parametric_model ' +
+      'this produces real analytic geometry and a STEP file, and the service verifies ' +
+      'declared fit checks. Inspect the returned render before finalising.',
+    inputSchema: brepPlanInputSchema,
+    outputSchema: brepCompileOutputSchema,
   }),
 };
 

@@ -19,16 +19,47 @@ import contextlib
 import io
 import json
 import os
+import subprocess
 import sys
 import time
 import traceback
 
 MARKER = "__BREP_RESULT__"
 
+# cadgen renders a mesh to a PNG. It lives outside this repo, so allow override.
+CADGEN = os.environ.get(
+    "CADGEN_EXE", "F:/projects/3D/text-to-cad/.venv/Scripts/cadgen.exe"
+)
+
 
 def emit(payload: dict) -> None:
     sys.stdout.write(MARKER + json.dumps(payload) + "\n")
     sys.stdout.flush()
+
+
+def render_view(outputs: dict, log) -> None:
+    """Render the mesh to a PNG and add it to the outputs.
+
+    This is what closes the vision loop: the caller feeds this image back to the
+    model so it looks at the geometry it just produced instead of being asked to
+    trust it. A missing renderer is not an error -- the build still succeeds.
+    """
+    stl = (outputs.get("stl") or {}).get("path")
+    if not stl or not os.path.exists(stl) or not os.path.exists(CADGEN):
+        return
+    out = os.path.abspath("view.png")
+    try:
+        proc = subprocess.run(
+            [CADGEN, "stl", "snapshot", stl, out],
+            capture_output=True,
+            timeout=420,
+        )
+        if proc.returncode == 0 and os.path.exists(out):
+            outputs["render"] = {"path": out, "bytes": os.path.getsize(out)}
+        else:
+            log.write(f"[render skipped] cadgen exited {proc.returncode}\n")
+    except Exception as exc:  # noqa: BLE001 - a render is a bonus, never fatal
+        log.write(f"[render failed] {type(exc).__name__}: {exc}\n")
 
 
 def export_all(part, log):
@@ -179,6 +210,7 @@ def main() -> None:
         payload["extra"] = extra
         payload["stats"] = stats_for(part)
         payload["outputs"] = export_all(part, log)
+        render_view(payload["outputs"], log)
         # fold the per-part STEPs into outputs so the service ships them too
         for name, info in (extra.get("parts") or {}).items():
             payload["outputs"][f"step:{name}"] = info
