@@ -19,10 +19,16 @@ The main shell is nominally 82 x 66 x 67 mm. The cap has 0.5 mm nominal clearanc
 - `dish_feed_tower.step/.stl`
 - `bait_gel_visual.step/.stl`
 - `clearance_lid.step/.stl`
-- `ant_bait_open.png`, `ant_bait_top.png`, `ant_bait_front.png`, `ant_bait_closed.png` — review views.
-- `model_ant_bait.py` — dimensioned FreeCAD/OpenCASCADE construction script.
+- `ant_bait_open.png`, `ant_bait_top.png`, `ant_bait_front.png`, `ant_bait_closed.png` — review views; the open isometric view uses the polished viewport style.
+- `model_ant_bait.py` — dimensioned FreeCAD/OpenCASCADE construction script with the presentation style applied by default.
 - `run_via_mcp.py` — submits the script as an MCP `tools/call` to a running FreeCAD-MCP server.
 - `validate_export.py` — re-imports the STEP using `freecadcmd` and reports topology.
+
+## Presentation setup
+
+The saved FreeCAD document and generator use **Shaded** display mode, a muted blue-gray/cream/amber palette, finer tessellation (`Deviation=0.08`, `AngularDeflection=12°`), a dark gradient background, and an axonometric perspective camera. The current machine also has hardware OpenGL/VBO enabled and a modest anti-aliasing setting. GPU preferences are global FreeCAD settings; display mode, colors, and camera are stored with the document. These choices affect the viewport only, not STEP/STL geometry.
+
+To get a more product-like viewport: avoid `Flat Lines` for the presentation pass, use hardware OpenGL when supported, select Perspective, and set a restrained background and palette. Keep Orthographic available for dimension checks.
 
 ## Validation results
 

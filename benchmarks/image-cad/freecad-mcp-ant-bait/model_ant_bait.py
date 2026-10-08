@@ -191,21 +191,24 @@ def add_feature(name, label, shape, color, transparency=0):
     obj.Label = label
     obj.Shape = shape
     obj.ViewObject.ShapeColor = color
-    obj.ViewObject.LineColor = (0.18, 0.18, 0.20)
-    obj.ViewObject.DisplayMode = "Flat Lines"
+    obj.ViewObject.LineColor = (0.16, 0.19, 0.23)
+    obj.ViewObject.DisplayMode = "Shaded"
+    obj.ViewObject.LineWidth = 1.0
+    obj.ViewObject.Deviation = 0.08
+    obj.ViewObject.AngularDeflection = 12.0
     obj.ViewObject.Transparency = transparency
     obj.addProperty("App::PropertyString", "ModelSource", "Design")
     obj.ModelSource = "model_ant_bait.py; image-derived dimensions in P"
     return obj
 
 body_obj = add_feature("RibbedStation", "Ribbed station / arched entries",
-                       body, (0.88, 0.90, 0.93), 0)
+                       body, (0.30, 0.40, 0.49), 0)
 dish_obj = add_feature("DishFeedTower", "Bait dish + hollow feed tower",
-                       dish_tower, (0.93, 0.93, 0.90), 0)
+                       dish_tower, (0.80, 0.76, 0.65), 0)
 gel_obj = add_feature("BaitGel", "Amber bait pool (visual placeholder)",
-                      gel, (1.0, 0.48, 0.06), 12)
+                      gel, (1.0, 0.43, 0.08), 0)
 lid_obj = add_feature("ClearanceLid", "Clearance-fit lid + loop handle",
-                      lid, (0.91, 0.93, 0.97), 5)
+                      lid, (0.72, 0.80, 0.86), 0)
 
 # Preserve the exact dimension assumptions in the native FCStd document.
 params_obj = doc.addObject("App::FeaturePython", "DesignParameters")
@@ -253,8 +256,13 @@ for obj, stem in ((body_obj, "station_base"),
 lid_obj.Placement.Base = Vector(104.0, 0.0, 0.0)
 doc.recompute()
 doc.saveAs(OUT + "/ant_bait_open.FCStd")
-Gui.activeDocument().activeView().viewAxonometric()
-Gui.activeDocument().activeView().fitAll()
+view = Gui.activeDocument().activeView()
+view.setCameraType("Perspective")
+view.viewAxonometric()
+view.fitAll()
+for _ in range(4):
+    view.zoomIn()
+doc.save()
 
 print("ANT_BAIT_STATS=" + json.dumps({
     "components": stats,
